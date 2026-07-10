@@ -380,3 +380,10 @@
 - 涉及文件：`docs/QQ_MUSIC_INTERFACE_NOTES.md`、`server.js`、`desktop/main.js`、`public/index.html`。
 - 关键参数/实现：区分网页账号态 `p_skey` 和播放票据 `qm_keyst`/`qqmusic_key`/`music_key`/`wxskey`；`/api/qq/login/status` 返回 `playbackKeyReady`；缺播放票据时 `104003` 归类为 `login_required`；昵称头像用 `ptnick_*` 和 `qlogo.cn` 兜底。
 - 禁止回退或改坏的点：不要再把 `p_skey` 当作完整 QQ 音乐播放授权；不要因为 QQ 资料接口 `code:1000` 就清空头像/昵称或标记未登录；修 QQ 播放前先读 `docs/QQ_MUSIC_INTERFACE_NOTES.md`。
+
+### 2026-07-10 - 保留本地启动脚本
+
+- 用户认可/要求保留：根目录 `start-mineradio.bat` 是日常启动 Mineradio 的便捷脚本，必须保留。
+- 涉及文件：`start-mineradio.bat`。
+- 关键参数/实现：脚本保持未跟踪，仅用于本机进入 `D:\mineRadio\Mineradio` 后执行 `npm start`。
+- 禁止回退或改坏的点：不要删除、移动或默认提交此脚本；只有用户明确要求时才将它纳入仓库。
