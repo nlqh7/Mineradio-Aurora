@@ -1,8 +1,9 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, clipboard } = require('electron');
 
 contextBridge.exposeInMainWorld('desktopWindow', {
   isDesktop: true,
   minimize: () => ipcRenderer.invoke('desktop-window-minimize'),
+  restore: () => ipcRenderer.invoke('desktop-window-restore'),
   toggleMaximize: () => ipcRenderer.invoke('desktop-window-toggle-maximize'),
   toggleFullscreen: () => ipcRenderer.invoke('desktop-window-toggle-fullscreen'),
   exitFullscreenWindowed: () => ipcRenderer.invoke('desktop-window-exit-fullscreen-windowed'),
@@ -12,13 +13,28 @@ contextBridge.exposeInMainWorld('desktopWindow', {
   close: () => ipcRenderer.invoke('desktop-window-close'),
   openNeteaseMusicLogin: () => ipcRenderer.invoke('netease-music-open-login'),
   clearNeteaseMusicLogin: () => ipcRenderer.invoke('netease-music-clear-login'),
-  openQQMusicLogin: () => ipcRenderer.invoke('qq-music-open-login'),
+  openQQMusicLogin: (options) => ipcRenderer.invoke('qq-music-open-login', options || {}),
   clearQQMusicLogin: () => ipcRenderer.invoke('qq-music-clear-login'),
+  openKugouMusicLogin: () => ipcRenderer.invoke('kugou-music-open-login'),
+  clearKugouMusicLogin: () => ipcRenderer.invoke('kugou-music-clear-login'),
+  openQishuiMusicLogin: () => ipcRenderer.invoke('qishui-music-open-login'),
+  clearQishuiMusicLogin: () => ipcRenderer.invoke('qishui-music-clear-login'),
+  openSpotifyMusicLogin: () => ipcRenderer.invoke('spotify-music-open-login'),
+  clearSpotifyMusicLogin: () => ipcRenderer.invoke('spotify-music-clear-login'),
   openUpdateInstaller: (filePath) => ipcRenderer.invoke('mineradio-open-update-installer', filePath),
   restartApp: () => ipcRenderer.invoke('mineradio-restart-app'),
   configureGlobalHotkeys: (bindings) => ipcRenderer.invoke('mineradio-hotkeys-configure-global', bindings || []),
+  copyText: (text) => {
+    clipboard.writeText(String(text || ''));
+    return { ok: true };
+  },
+  readText: () => ({ ok: true, text: clipboard.readText() || '' }),
   exportJsonFile: (payload) => ipcRenderer.invoke('mineradio-export-json-file', payload || {}),
+  exportLoginCookie: (provider) => ipcRenderer.invoke('mineradio-export-login-cookie', provider || ''),
   importJsonFile: () => ipcRenderer.invoke('mineradio-import-json-file'),
+  readCurrentFxAutosaveSync: () => ipcRenderer.sendSync('mineradio-current-fx-autosave-read-sync'),
+  saveCurrentFxAutosaveSync: (payload) => ipcRenderer.sendSync('mineradio-current-fx-autosave-save-sync', payload || {}),
+  saveCurrentFxAutosave: (payload) => ipcRenderer.invoke('mineradio-current-fx-autosave-save', payload || {}),
   onGlobalHotkey: (callback) => {
     if (typeof callback !== 'function') return () => {};
     const listener = (_event, payload) => callback(payload || {});
