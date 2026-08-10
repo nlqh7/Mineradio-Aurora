@@ -8,9 +8,45 @@ contextBridge.exposeInMainWorld('desktopWindow', {
   toggleFullscreen: () => ipcRenderer.invoke('desktop-window-toggle-fullscreen'),
   exitFullscreenWindowed: () => ipcRenderer.invoke('desktop-window-exit-fullscreen-windowed'),
   getState: () => ipcRenderer.invoke('desktop-window-get-state'),
-  setPassthroughMode: (enabled) => ipcRenderer.invoke('desktop-window-set-passthrough', !!enabled),
-  togglePassthroughMode: () => ipcRenderer.invoke('desktop-window-toggle-passthrough'),
-  close: () => ipcRenderer.invoke('desktop-window-close'),
+  getGpuDiagnostics: () => ipcRenderer.invoke('mineradio-get-gpu-diagnostics'),
+  getMemorySnapshot: () => ipcRenderer.invoke('mineradio-memory-get-snapshot'),
+  configureMemoryReduct: (payload) => ipcRenderer.invoke('mineradio-memory-configure-auto', payload || {}),
+  trimAppMemory: (payload) => ipcRenderer.invoke('mineradio-memory-trim-app', payload || {}),
+  purgeSystemMemory: (payload) => ipcRenderer.invoke('mineradio-memory-purge-system', payload || {}),
+  getCacheSettings: () => ipcRenderer.invoke('mineradio-cache-get-settings'),
+  chooseCacheDirectory: () => ipcRenderer.invoke('mineradio-cache-choose-directory'),
+  setCacheSettings: (payload) => ipcRenderer.invoke('mineradio-cache-set-settings', payload || {}),
+  listWallpaperEngineProjects: (payload) => ipcRenderer.invoke('mineradio-wallpaper-engine-list', payload || {}),
+  getWallpaperEngineProjectDetails: (id) => ipcRenderer.invoke('mineradio-wallpaper-engine-project-details', String(id || '')),
+  openWallpaperEngineProjectDetails: (id, target) => ipcRenderer.invoke('mineradio-wallpaper-engine-open-project-details', {
+    id: String(id || ''),
+    target: target === 'workshop' ? 'workshop' : 'we',
+  }),
+  chooseWallpaperEngineDirectory: () => ipcRenderer.invoke('mineradio-wallpaper-engine-choose-directory'),
+  chooseWallpaperEngineProjectFile: () => ipcRenderer.invoke('mineradio-wallpaper-engine-choose-project-file'),
+  removeWallpaperEngineDirectory: (rootId) => ipcRenderer.invoke('mineradio-wallpaper-engine-remove-directory', String(rootId || '')),
+  getWallpaperEngineRuntimeStatus: (payload) => ipcRenderer.invoke('mineradio-wallpaper-engine-runtime-status', payload || {}),
+  startWallpaperEngineScene: (payload) => ipcRenderer.invoke('mineradio-wallpaper-engine-start-scene', payload || {}),
+  reportWallpaperEngineCaptureResult: (payload) => ipcRenderer.invoke('mineradio-wallpaper-engine-capture-result', payload || {}),
+  prepareWallpaperEngineGlassCapture: (payload) => ipcRenderer.invoke('mineradio-wallpaper-engine-prepare-glass-capture', payload || {}),
+  activateWallpaperEngineDwmSurface: (payload) => ipcRenderer.invoke('mineradio-wallpaper-engine-activate-dwm-surface', payload || {}),
+  updateWallpaperEngineGlassSurface: (payload) => ipcRenderer.send('mineradio-wallpaper-engine-glass-surface', payload || {}),
+  reportWallpaperEnginePointerActivity: (payload) => ipcRenderer.send('mineradio-wallpaper-engine-pointer-activity', payload || {}),
+  stopWallpaperEngineScene: (payload) => ipcRenderer.invoke('mineradio-wallpaper-engine-stop-scene', payload || {}),
+  onWallpaperEngineHostBoundsChanged: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload || {});
+    ipcRenderer.on('mineradio-wallpaper-engine-host-bounds-changed', listener);
+    return () => ipcRenderer.removeListener('mineradio-wallpaper-engine-host-bounds-changed', listener);
+  },
+  readLyricCache: (key) => ipcRenderer.invoke('mineradio-cache-read-lyric', key || ''),
+  writeLyricCache: (key, payload) => ipcRenderer.invoke('mineradio-cache-write-lyric', key || '', payload || {}),
+  close: (behavior) => ipcRenderer.invoke('desktop-window-close', behavior),
+  getCloseBehavior: () => ipcRenderer.invoke('desktop-window-get-close-behavior'),
+  setCloseBehavior: (behavior) => ipcRenderer.invoke('desktop-window-set-close-behavior', behavior),
+  getLoginEasterEggStatus: () => ipcRenderer.invoke('mineradio-login-easter-egg-status'),
+  unlockLoginEasterEgg: (value) => ipcRenderer.invoke('mineradio-login-easter-egg-unlock', String(value || '')),
+  resetLoginEasterEgg: () => ipcRenderer.invoke('mineradio-login-easter-egg-reset'),
   openNeteaseMusicLogin: () => ipcRenderer.invoke('netease-music-open-login'),
   clearNeteaseMusicLogin: () => ipcRenderer.invoke('netease-music-clear-login'),
   openQQMusicLogin: (options) => ipcRenderer.invoke('qq-music-open-login', options || {}),
@@ -55,20 +91,26 @@ contextBridge.exposeInMainWorld('desktopWindow', {
     ipcRenderer.on('mineradio-desktop-lyrics-enabled-state', listener);
     return () => ipcRenderer.removeListener('mineradio-desktop-lyrics-enabled-state', listener);
   },
-  onPassthroughModeState: (callback) => {
-    if (typeof callback !== 'function') return () => {};
-    const listener = (_event, payload) => callback(payload || {});
-    ipcRenderer.on('desktop-window-passthrough-state', listener);
-    return () => ipcRenderer.removeListener('desktop-window-passthrough-state', listener);
-  },
   setWallpaperMode: (enabled, payload) => ipcRenderer.invoke('mineradio-wallpaper-set-enabled', !!enabled, payload || {}),
   updateWallpaperMode: (payload) => ipcRenderer.invoke('mineradio-wallpaper-update', payload || {}),
-  weWallpaperList: () => ipcRenderer.invoke('mineradio-we-wallpaper-list'),
-  weWallpaperThumbnail: (id) => ipcRenderer.invoke('mineradio-we-wallpaper-thumbnail', id),
-  weWallpaperMedia: (id, mediaType) => ipcRenderer.invoke('mineradio-we-wallpaper-media', id, mediaType || 'image'),
-  weWallpaperCleanup: () => ipcRenderer.invoke('mineradio-we-wallpaper-cleanup'),
-  weWallpaperScanStale: () => ipcRenderer.invoke('mineradio-we-wallpaper-scan-stale'),
-  weWallpaperOpenFolder: (id) => ipcRenderer.invoke('mineradio-we-wallpaper-open-folder', id),
+  getWallpaperModeStatus: () => ipcRenderer.invoke('mineradio-wallpaper-get-status'),
+  updateDesktopIconShields: (payload) => ipcRenderer.send('mineradio-full-desktop-icon-shields', payload || {}),
+  setDesktopSoftwareLocked: (locked) => ipcRenderer.invoke('mineradio-full-desktop-set-software-lock', locked === true),
+  setDesktopIconsVisible: (visible) => ipcRenderer.invoke('mineradio-full-desktop-set-icons-visible', visible !== false),
+  requestDesktopKeyboardFocus: (reason) => ipcRenderer.send(
+    'mineradio-full-desktop-request-keyboard-focus',
+    String(reason || 'renderer-pointerdown').slice(0, 80)
+  ),
+  updateDesktopPointerRoute: (payload) => ipcRenderer.send('mineradio-full-desktop-pointer-route', {
+    overSoftwareUi: payload && payload.overSoftwareUi === true,
+    overDesktopControls: payload && payload.overDesktopControls === true,
+  }),
+  onWallpaperModeState: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload || {});
+    ipcRenderer.on('mineradio-wallpaper-runtime-state', listener);
+    return () => ipcRenderer.removeListener('mineradio-wallpaper-runtime-state', listener);
+  },
   onStateChange: (callback) => {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on('desktop-window-state', listener);
