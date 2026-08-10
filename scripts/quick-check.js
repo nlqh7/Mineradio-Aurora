@@ -105,9 +105,24 @@ function runPlaybackSourceFallbackTransactionCheck() {
   process.stdout.write(result.stdout || '');
 }
 
-function runQQVipEntitlementRegressionCheck() {
-  logStep('QQ VIP entitlement regression');
-  const testFile = path.join(appRoot, 'tests', 'qq-vip-entitlement.test.js');
+function runLocalMusicLibraryRegressionCheck() {
+  logStep('Persistent local FLAC library regression');
+  const testFile = path.join(appRoot, 'tests', 'local-music-library-persistence.test.js');
+  const result = spawnSync(process.execPath, ['--test', testFile], {
+    cwd: appRoot,
+    encoding: 'utf8'
+  });
+  if (result.status !== 0) {
+    process.stdout.write(result.stdout || '');
+    process.stderr.write(result.stderr || '');
+    fail(`persistent local FLAC library regression failed: ${rel(testFile)}`);
+  }
+  process.stdout.write(result.stdout || '');
+}
+
+function runWallpaperEngineIdleDisposeRegressionCheck() {
+  logStep('Wallpaper Engine idle-dispose regression');
+  const testFile = path.join(appRoot, 'tests', 'wallpaper-engine-idle-dispose.test.js');
   const result = spawnSync(process.execPath, [testFile], {
     cwd: appRoot,
     encoding: 'utf8'
@@ -115,22 +130,44 @@ function runQQVipEntitlementRegressionCheck() {
   if (result.status !== 0) {
     process.stdout.write(result.stdout || '');
     process.stderr.write(result.stderr || '');
-    fail(`QQ VIP entitlement regression failed: ${rel(testFile)}`);
+    fail(`Wallpaper Engine idle-dispose regression failed: ${rel(testFile)}`);
+  }
+  process.stdout.write(result.stdout || '');
+}
+
+function runQQVipEntitlementRegressionCheck() {
+  logStep('QQ/Kugou provider entitlement regression');
+  const testFiles = [
+    path.join(appRoot, 'tests', 'qq-vip-entitlement.test.js'),
+    path.join(appRoot, 'tests', 'kugou-vip-hardening.test.js'),
+    path.join(appRoot, 'tests', 'provider-entitlement-boundary.test.js'),
+  ];
+  const result = spawnSync(process.execPath, ['--test'].concat(testFiles), {
+    cwd: appRoot,
+    encoding: 'utf8'
+  });
+  if (result.status !== 0) {
+    process.stdout.write(result.stdout || '');
+    process.stderr.write(result.stderr || '');
+    fail('QQ/Kugou provider entitlement regression failed');
   }
   process.stdout.write(result.stdout || '');
 }
 
 function runLoginEasterEggGateRegressionCheck() {
-  logStep('Login easter egg one-time gate regression');
-  const testFile = path.join(appRoot, 'tests', 'login-easter-egg-gate.test.js');
-  const result = spawnSync(process.execPath, [testFile], {
+  logStep('Login easter egg one-time gate and IME focus regression');
+  const testFiles = [
+    path.join(appRoot, 'tests', 'login-easter-egg-gate.test.js'),
+    path.join(appRoot, 'tests', 'login-easter-egg-ime-focus.test.js'),
+  ];
+  const result = spawnSync(process.execPath, ['--test'].concat(testFiles), {
     cwd: appRoot,
-    encoding: 'utf8'
+    encoding: 'utf8',
   });
   if (result.status !== 0) {
     process.stdout.write(result.stdout || '');
     process.stderr.write(result.stderr || '');
-    fail(`login easter egg gate regression failed: ${rel(testFile)}`);
+    fail(`login easter egg gate/IME regression failed: ${testFiles.map(rel).join(', ')}`);
   }
   process.stdout.write(result.stdout || '');
 }
@@ -184,16 +221,21 @@ function runHomeDailyRecommendationRegressionCheck() {
 }
 
 function runQishuiProviderDistributionRegressionCheck() {
-  logStep('Qishui provider distribution regression');
-  const testFile = path.join(appRoot, 'tests', 'qishui-provider-distribution.test.js');
-  const result = spawnSync(process.execPath, [testFile], {
+  logStep('Qishui provider distribution, entitlement, and signed Passport QR regression');
+  const testFiles = [
+    path.join(appRoot, 'tests', 'qishui-provider-distribution.test.js'),
+    path.join(appRoot, 'tests', 'qishui-passport-qr-login.test.js'),
+    path.join(appRoot, 'tests', 'qishui-entitlement-cache.test.js'),
+    path.join(appRoot, 'tests', 'qishui-tier-rights.test.js'),
+  ];
+  const result = spawnSync(process.execPath, ['--test'].concat(testFiles), {
     cwd: appRoot,
     encoding: 'utf8'
   });
   if (result.status !== 0) {
     process.stdout.write(result.stdout || '');
     process.stderr.write(result.stderr || '');
-    fail(`Qishui provider distribution regression failed: ${rel(testFile)}`);
+    fail('Qishui provider distribution/entitlement/QR regression failed');
   }
   process.stdout.write(result.stdout || '');
 }
@@ -344,8 +386,8 @@ function checkWallpaperEngineImportGuard() {
   if (/spawn\s*\(|shell\.open|wallpaper64/i.test(libraryText)) {
     fail('Wallpaper Engine import must not execute imported applications or modify the Windows wallpaper');
   }
-  if (!/Get-AuthenticodeSignature/.test(runtimeText) || !/Skutta Software/.test(runtimeText) || !/engineProcessProbe/.test(runtimeText) || /onSourceMiss/.test(runtimeText) || !/projectFile/.test(runtimeText) || !/'openWallpaper'/.test(runtimeText) || !/'-playInWindow'/.test(runtimeText) || !/'closeWallpaper'/.test(runtimeText) || !/'-location'/.test(runtimeText) || !/shell:\s*false/.test(runtimeText) || !/desktopCapturer/.test(runtimeText) || !/controlBrokerScript/.test(runtimeText) || !/GetShellWindow/.test(runtimeText) || !/GetIntegrityRid/.test(runtimeText) || !/PROC_THREAD_ATTRIBUTE_PARENT_PROCESS/.test(runtimeText) || !/CreateProcessW/.test(runtimeText) || !/hostElevationProbe/.test(runtimeText) || !/MINERADIO_WE_CONTROL_TARGET/.test(runtimeText) || !/MINERADIO_WE_CONTROL_COMMAND_LINE/.test(runtimeText) || !/systemMemory\.probeProcessElevation/.test(mainText) || !/operation\s*=\s*\+\+wallpaperEngineCaptureOperation[\s\S]{0,320}probeProcessElevation\(\)[\s\S]{0,240}operation\s*!==\s*wallpaperEngineCaptureOperation/.test(mainText) || !/WALLPAPER_ENGINE_HOST_ELEVATED/.test(mainText) || !/WALLPAPER_ENGINE_HOST_ELEVATED/.test(rendererText)) {
-    fail('Wallpaper Engine Scene runtime must use the signed official engine, Explorer-parent medium integrity, unique pop-out control, and a captured window source');
+  if (!/Get-AuthenticodeSignature/.test(runtimeText) || !/Skutta Software/.test(runtimeText) || !/engineProcessProbe/.test(runtimeText) || /onSourceMiss/.test(runtimeText) || !/projectFile/.test(runtimeText) || !/'openWallpaper'/.test(runtimeText) || !/'-playInWindow'/.test(runtimeText) || !/'closeWallpaper'/.test(runtimeText) || !/'-location'/.test(runtimeText) || !/shell:\s*false/.test(runtimeText) || !/desktopCapturer/.test(runtimeText) || !/controlBrokerScript/.test(runtimeText) || !/GetShellWindow/.test(runtimeText) || !/GetIntegrityRid/.test(runtimeText) || !/PROC_THREAD_ATTRIBUTE_PARENT_PROCESS/.test(runtimeText) || !/CreateProcessW/.test(runtimeText) || !/hostElevationProbe/.test(runtimeText) || !/MINERADIO_WE_CONTROL_TARGET/.test(runtimeText) || !/MINERADIO_WE_CONTROL_COMMAND_LINE/.test(runtimeText) || !/hostElevationProbe:\s*systemMemory\.probeProcessElevation/.test(mainText) || /WALLPAPER_ENGINE_HOST_ELEVATED/.test(mainText)) {
+    fail('Wallpaper Engine Scene runtime must use the signed official engine, route elevated hosts through the Explorer medium-integrity broker, and retain the captured window source');
   }
   const dwmSurfaceBlock = runtimeText.slice(
     runtimeText.indexOf('function nativeDwmThumbnailSurfaceScript'),
@@ -1312,7 +1354,7 @@ function checkPersistentCacheStorageGuard() {
   const cssText = fs.readFileSync(path.join(appRoot, 'public', 'css', 'index.css'), 'utf8');
   const setNameAt = mainText.indexOf('app.setName(APP_NAME)');
   const firstUserDataLookupAt = mainText.indexOf("app.getPath('appData')");
-  if (!/const CACHE_SETTINGS_FILE/.test(mainText) || !/const LYRIC_CACHE_MAX_BYTES = 96 \* 1024 \* 1024/.test(mainText) || !/function defaultCacheRootPath\(\)/.test(mainText) || !/path\.join\(dDrive, 'MineradioCache'\)/.test(mainText) || setNameAt < 0 || firstUserDataLookupAt < 0 || setNameAt > firstUserDataLookupAt || !/const STABLE_USER_DATA_PATH = path\.join\(app\.getPath\('appData'\), APP_NAME\)/.test(mainText) || !/app\.setPath\('userData', STABLE_USER_DATA_PATH\)/.test(mainText) || !/app\.setPath\('sessionData', chromiumSessionDataPath\(cacheSettings\)\)/.test(mainText) || !/const currentChromiumPath = app\.getPath\('sessionData'\)/.test(mainText) || !/MINERADIO_BEAT_CACHE_DIR = cacheSettings\.beatmapsPath/.test(mainText) || !/nativePath:\s*path\.join\(rootPath, 'native-helper-temp'\)/.test(mainText) || !/const NATIVE_HELPER_TEMP_PATH = INITIAL_CACHE_SETTINGS\.nativePath/.test(mainText) || !/activeWallpaperEnginePath/.test(mainText) || !/wallpaperEngineBytes/.test(mainText)) {
+  if (!/const CACHE_SETTINGS_FILE/.test(mainText) || !/const LYRIC_CACHE_MAX_BYTES = 96 \* 1024 \* 1024/.test(mainText) || !/function defaultCacheRootPath\(\)/.test(mainText) || !/path\.join\(dDrive, 'MineradioCache'\)/.test(mainText) || setNameAt < 0 || firstUserDataLookupAt < 0 || setNameAt > firstUserDataLookupAt || !/const STABLE_USER_DATA_PATH = STARTUP_QA_USER_DATA_PATH \|\| path\.join\(app\.getPath\('appData'\), APP_NAME\)/.test(mainText) || !/app\.setPath\('userData', STABLE_USER_DATA_PATH\)/.test(mainText) || !/app\.setPath\('sessionData', chromiumSessionDataPath\(cacheSettings\)\)/.test(mainText) || !/const currentChromiumPath = app\.getPath\('sessionData'\)/.test(mainText) || !/MINERADIO_BEAT_CACHE_DIR = cacheSettings\.beatmapsPath/.test(mainText) || !/nativePath:\s*path\.join\(rootPath, 'native-helper-temp'\)/.test(mainText) || !/const NATIVE_HELPER_TEMP_PATH = INITIAL_CACHE_SETTINGS\.nativePath/.test(mainText) || !/activeWallpaperEnginePath/.test(mainText) || !/wallpaperEngineBytes/.test(mainText)) {
     fail('desktop cache settings must keep app-owned userData stable and route Chromium sessionData plus beatmaps to the configurable cache root');
   }
   if (!/function migrateMisplacedAppOwnedFiles\(\)/.test(mainText) || !/APP_OWNED_MIGRATION_FILES/.test(mainText) || !/process\.env\.QISHUI_COOKIE_FILE = path\.join\(STABLE_USER_DATA_PATH, '\.qishui-cookie'\)/.test(mainText) || !/process\.env\.SPOTIFY_TOKEN_FILE = path\.join\(STABLE_USER_DATA_PATH, '\.spotify-token\.json'\)/.test(mainText)) {
@@ -1328,10 +1370,51 @@ function checkPersistentCacheStorageGuard() {
   if (!/function persistentLyricCacheKey/.test(lyricText) || !/await readPersistentLyricCache\(song\)/.test(lyricText) || !/refreshPersistentLyricCache\(song\)/.test(lyricText) || !/writePersistentLyricCache\(song, mergedResponse\)/.test(lyricText) || !/function scheduleQueueLyricPrefetch/.test(lyricText) || !/function runQueueLyricPrefetch/.test(lyricText) || !/scheduleQueueLyricPrefetch\(idx, 2400\)/.test(playbackStartText)) {
     fail('lyrics must read persistent cache before network fetch, refresh it without blocking playback, and prefetch the next queue lyric');
   }
-  if (!/07-fx\/08-cache-storage-settings\.js/.test(loaderText) || !/cache-storage-panel/.test(htmlText) || !/cache-storage-lyrics-size/.test(htmlText) || !/cache-storage-chromium-size/.test(htmlText) || !/cache-storage-beatmaps-size/.test(htmlText) || !/cache-storage-updates-size/.test(htmlText) || !/cache-storage-wallpaper-size/.test(htmlText) || !/cache-storage-userdata-size/.test(htmlText) || !/cache-storage-beatmaps-path/.test(cacheUiText) || !/cache-storage-updates-path/.test(cacheUiText) || !/cache-storage-wallpaper-path/.test(cacheUiText) || !/function chooseMineradioCacheRoot/.test(cacheUiText) || !/function refreshMineradioCacheSettings/.test(cacheUiText) || !/\.cache-storage-panel/.test(cssText)) {
+  if (!/07-fx\/08-cache-storage-settings\.js/.test(loaderText) || !/cache-storage-panel/.test(htmlText) || !/cache-storage-lyrics-size/.test(htmlText) || !/cache-storage-chromium-size/.test(htmlText) || !/cache-storage-beatmaps-size/.test(htmlText) || !/cache-storage-wallpaper-size/.test(htmlText) || !/cache-storage-userdata-size/.test(htmlText) || !/cache-storage-beatmaps-path/.test(cacheUiText) || !/cache-storage-wallpaper-path/.test(cacheUiText) || !/function chooseMineradioCacheRoot/.test(cacheUiText) || !/function refreshMineradioCacheSettings/.test(cacheUiText) || !/\.cache-storage-panel/.test(cssText) || /cache-storage-updates-(?:path|size)/.test(htmlText + cacheUiText)) {
     fail('advanced settings must show configurable cache paths and their current usage');
   }
   console.log('[OK] Persistent lyric and application cache paths are configurable and report current usage.');
+}
+
+function checkExternalUpdatePageBridgeGuard() {
+  logStep('External update page bridge guard');
+  const mainText = fs.readFileSync(path.join(appRoot, 'desktop', 'main.js'), 'utf8');
+  const preloadText = fs.readFileSync(path.join(appRoot, 'desktop', 'preload.js'), 'utf8');
+  const serverText = fs.readFileSync(path.join(appRoot, 'server.js'), 'utf8');
+  const updateUiText = fs.readFileSync(path.join(appRoot, 'public', 'js', 'modules', '08-account', '00-update-preview.js'), 'utf8');
+  const bridgeText = mainText + '\n' + preloadText;
+  if (
+    !/ipcMain\.handle\('mineradio-open-update-page', async \(event, value\) =>/.test(mainText)
+    || !/isTrustedMainWindowIpc\(event\)/.test(mainText)
+    || !/target\.length > 2048/.test(mainText)
+    || !/parsed\.protocol !== 'https:'/.test(mainText)
+    || !/await shell\.openExternal\(parsed\.href\)/.test(mainText)
+    || !/openUpdatePage: \(url\) => ipcRenderer\.invoke\('mineradio-open-update-page'/.test(preloadText)
+  ) {
+    fail('desktop update bridge must open only bounded HTTPS pages from the trusted main document');
+  }
+  if (/mineradio-open-update-installer|openUpdateInstaller|getUpdateDownloadDir|MINERADIO_UPDATE_DIR/.test(bridgeText)) {
+    fail('desktop update bridge must not expose the removed local installer or update-cache path');
+  }
+  if (
+    !/mineradio-download-page/.test(serverText)
+    || !/extractReleaseDownloadPages/.test(serverText)
+    || !/downloadPages/.test(serverText)
+    || !/error:\s*'UPDATE_EXTERNAL_ONLY'/.test(serverText)
+    || !/openUpdateDownloadSource/.test(updateUiText)
+    || !/update-download-source/.test(updateUiText)
+    || !/desktopWindow\.openUpdatePage\(target\)/.test(updateUiText)
+    || !/软件不会在本地下载或应用补丁/.test(updateUiText)
+  ) {
+    fail('updates must resolve to an external download page and keep legacy local routes disabled');
+  }
+  if (
+    /startUpdateDownloadJob|startUpdatePatchJob|updateDownloadJobs|UPDATE_DOWNLOAD_DIR|pickPatchAsset/.test(serverText)
+    || /\/api\/update\/(?:download|patch)|openUpdateInstaller|快速补丁/.test(updateUiText)
+  ) {
+    fail('local installer download and quick-patch workers must remain removed');
+  }
+  console.log('[OK] Updates use a trusted HTTPS-only external-page bridge with no local installer path.');
 }
 
 function checkLyricTranslationCompletenessGuard() {
@@ -1397,6 +1480,9 @@ function checkQishuiProviderGuard() {
   const qishuiStatusText = fs.readFileSync(path.join(appRoot, 'public', 'js', 'modules', '08-account', '02-login-status.js'), 'utf8');
   const accountLogoutText = fs.readFileSync(path.join(appRoot, 'public', 'js', 'modules', '08-account', '04-user-modal-logout.js'), 'utf8');
   const desktopMainText = fs.readFileSync(path.join(appRoot, 'desktop', 'main.js'), 'utf8');
+  const desktopPreloadText = fs.readFileSync(path.join(appRoot, 'desktop', 'preload.js'), 'utf8');
+  const qishuiPassportText = fs.readFileSync(path.join(appRoot, 'qishui-auth-v6.js'), 'utf8');
+  const qishuiQrBridgeText = fs.readFileSync(path.join(appRoot, 'qishui-qr-login.js'), 'utf8');
   const indexText = fs.readFileSync(path.join(appRoot, 'public', 'index.html'), 'utf8');
   if (!/QISHUI_PUBLIC_SEARCH_URL/.test(qishuiText) || !/api-vehicle\.volcengine\.com\/v2\/search\/type/.test(qishuiText) || !/function handleQishuiPublicSearch/.test(qishuiText)) {
     fail('Qishui must keep a public search fallback so the provider is usable before OAuth credentials are bundled');
@@ -1407,39 +1493,33 @@ function checkQishuiProviderGuard() {
   if (/vsaa\.cn|QISHUI_VIP_PROXY|music\.qishui\.vip/.test(qishuiText)) {
     fail('Qishui playback must not depend on third-party VIP/proxy endpoints');
   }
-  if (!/search: configured \|\| QISHUI_PUBLIC_ENABLED/.test(qishuiText) || !/请先登录本机汽水音乐 PC 客户端/.test(qishuiText)) {
-    fail('Qishui status must keep public search separate from the required local SodaMusic session import');
+  if (!/search: tokenConfigured \|\| webSession \|\| QISHUI_PUBLIC_ENABLED/.test(qishuiText) || !/loggedIn: webSession/.test(qishuiText) || !/请使用抖音 App 扫描 Mineradio 中的汽水官方二维码/.test(qishuiText)) {
+    fail('Qishui status must keep public catalogue readiness separate from an authenticated Passport Web session');
   }
   const oldQishuiCredentialPrompt = new RegExp('当前版本还没有内置' + '抖音开放平台应用凭证');
-  if (!/function qishuiPublicSearchReady/.test(qishuiLoginText) || !/function openQishuiPublicSearch/.test(qishuiLoginText) || !/hasQishuiLocalImportBridge/.test(qishuiLoginText) || !/refreshBtn\.onclick = openQishuiWebLogin;/.test(qishuiLoginText) || oldQishuiCredentialPrompt.test(qishuiLoginText)) {
-    fail('Qishui login modal must expose the desktop local-session import bridge without hiding public search elsewhere');
+  if (!/function qishuiPublicSearchReady/.test(qishuiLoginText) || !/function openQishuiPublicSearch/.test(qishuiLoginText) || !/refreshBtn\.onclick = isQishui \? openQishuiWebLogin :/.test(qishuiLoginText) || oldQishuiCredentialPrompt.test(qishuiLoginText)) {
+    fail('Qishui login modal must retain public search separately from official Passport QR authentication');
   }
   if (!/searchReady/.test(qishuiStatusText) || !/capabilities\.search/.test(qishuiStatusText)) {
     fail('Qishui frontend status must expose public search readiness separately from OAuth login');
   }
-  if (!/QISHUI_OFFICIAL_CLIENT_DATA_DIRS/.test(desktopMainText) || !/function extractQishuiCookieHeaderFromCookieDatabase/.test(desktopMainText) || !/function extractQishuiSessionIdFromCookieDatabase/.test(desktopMainText) || !/function readQishuiOfficialClientCookieDatabase/.test(desktopMainText) || !/importedOfficialClient: true/.test(desktopMainText) || !/QISHUI_LOCAL_COOKIE_DB_LOCKED/.test(desktopMainText) || !/QISHUI_LOCAL_COOKIE_NOT_FOUND/.test(desktopMainText)) {
-    fail('Qishui desktop login must read and report the complete local SodaMusic PC session');
+  if (!/require\('\.\/qishui-qr-login'\)/.test(serverText) || !/\/api\/qishui\/login\/qrcode/.test(serverText) || !/\/api\/qishui\/login\/check/.test(serverText) || /pn === '\/api\/qishui\/login\/(?:token|cookie)'/.test(serverText)) {
+    fail('Qishui login server must expose only the signed Passport QR create/check boundary');
   }
-  if (!/function readSavedQishuiCookieHeader\(\)/.test(desktopMainText) || !/const saved = readSavedQishuiCookieHeader\(\)/.test(desktopMainText) || !/savedStatus = await handleQishuiStatus\(saved\.cookie\)/.test(desktopMainText) || !/savedStatus\.loggedIn && savedStatus\.webSession/.test(desktopMainText) || !/persistedSession: true/.test(desktopMainText)) {
-    fail('Qishui desktop login must validate the cached Mineradio copy when the official client is temporarily unavailable');
+  if (!/persist:mineradio-qishui-auth-v6/.test(qishuiPassportText) || !/a_bogus/.test(qishuiPassportText) || !/check_qrconnect/.test(qishuiPassportText) || !/secondVerify/.test(qishuiPassportText) || !/createQishuiQrLoginBridge/.test(qishuiQrBridgeText)) {
+    fail('Qishui Passport QR must retain the isolated signing runtime, a_bogus validation, polling, persistence, and MFA bridge');
   }
-  const officialCookieReaderStart = desktopMainText.indexOf('async function readQishuiOfficialClientCookieHeader');
-  const officialCookieReaderEnd = desktopMainText.indexOf('\nfunction kugouCookieHasLogin', officialCookieReaderStart);
-  const officialCookieReaderText = desktopMainText.slice(officialCookieReaderStart, officialCookieReaderEnd);
-  if (officialCookieReaderStart < 0 || officialCookieReaderEnd <= officialCookieReaderStart || !/let lastLocked = null/.test(officialCookieReaderText) || /if \(direct && direct\.locked\) return/.test(officialCookieReaderText) || !/lastLocked \|\| last \|\| \{\}/.test(officialCookieReaderText)) {
-    fail('Qishui official-client import must try every cookie database and Electron session fallback before reporting a locked database');
+  if (!/pollQishuiQr/.test(qishuiLoginText) || !/请使用抖音 App 扫码并确认登录/.test(qishuiLoginText) || /读取本机汽水|本机会话|Token 导入|submitQishuiTokenLogin|openQishuiMusicLogin/.test(qishuiLoginText)) {
+    fail('Qishui login UI must use only the official in-panel QR flow');
   }
-  const qishuiLocalLoginStart = desktopMainText.indexOf('async function openQishuiMusicLoginWindow');
-  const qishuiLocalLoginEnd = desktopMainText.indexOf('\nasync function clearQishuiMusicLoginSession', qishuiLocalLoginStart);
-  const qishuiLocalLoginText = desktopMainText.slice(qishuiLocalLoginStart, qishuiLocalLoginEnd);
-  if (qishuiLocalLoginStart < 0 || qishuiLocalLoginEnd <= qishuiLocalLoginStart || qishuiLocalLoginText.indexOf('readQishuiOfficialClientCookieHeader()') > qishuiLocalLoginText.indexOf('readSavedQishuiCookieHeader()') || /openQishuiOfficialWebLoginWindow\s*\(/.test(qishuiLocalLoginText) || /createQishuiPcQrLogin\s*\(/.test(qishuiLocalLoginText)) {
-    fail('Qishui normal login route must be strict local-first and must never fall through to QR/OAuth');
+  if (/ipcMain\.handle\('qishui-music-open-login'/.test(desktopMainText) || /openQishuiMusicLogin/.test(desktopPreloadText) || !/await qishuiQrLogin\.clear\(\)/.test(desktopMainText)) {
+    fail('Qishui desktop bridge must remove the old login-window IPC and await Passport partition cleanup');
   }
-  if (!/本机汽水会话已导入/.test(accountLogoutText) || !/可同步我的喜欢、歌单并直接播放/.test(accountLogoutText) || /授权: '\s*\+/.test(accountLogoutText) || /OpenAPI token/.test(accountLogoutText)) {
-    fail('Qishui account status must describe the imported local PC session without exposing internal ids');
+  if (!/汽水音乐已扫码登录/.test(accountLogoutText) || !/按账号权益播放/.test(accountLogoutText) || /本机汽水会话|OpenAPI token/.test(accountLogoutText)) {
+    fail('Qishui account status must describe the official QR session without exposing legacy import modes');
   }
-  if (!/canOpenQishuiOfficialWindow/.test(qishuiLoginText) || !/openQishuiWebLogin/.test(qishuiLoginText) || !/读取本机汽水/.test(qishuiLoginText) || !/本机汽水登录态导入失败/.test(qishuiLoginText) || /扫码连接汽水|汽水扫码连接/.test(qishuiLoginText)) {
-    fail('Qishui login UI must expose only the local SodaMusic session import path');
+  if (!/官方扫码 \/ 抖音确认/.test(indexText) || /本地会话 \/ PC 客户端/.test(indexText)) {
+    fail('Qishui login node must identify the official QR flow');
   }
   if (!/\/luna\/pc\/me/.test(qishuiText) || !/\/luna\/pc\/user\/playlist/.test(qishuiText) || !/\/luna\/pc\/playlist\/detail/.test(qishuiText) || !/function qishuiPcAppParams/.test(qishuiText) || !/pcApp: true/.test(qishuiText) || !/count: Math\.min\(100/.test(qishuiText) || /\/luna\/pc\/playlist\/detail[\s\S]{0,260}cnt:/.test(qishuiText)) {
     fail('Qishui playlist sync must use PC app APIs with user playlist, count/next_cursor, and LunaPC headers');
@@ -2265,19 +2345,26 @@ function checkProviderEntitlementBoundaryGuard() {
   if (!/function normalizeKugouVipPayloadV2/.test(kugouText) ||
       /\/vip\|member\|music_pack\//.test(kugouText) ||
       /const vipText = Object\.keys/.test(kugouText) ||
-      !/const apiMembershipKnown = payloadObjects\.some\(kugouObjectHasMembershipSignal\)/.test(kugouText) ||
-      !/membershipVerified:\s*membershipKnown/.test(kugouText) ||
-      !/membershipSource:\s*apiMembershipKnown[\s\S]*?'kugou-vip-api'/.test(kugouText)) {
-    fail('Kugou membership must come from explicit positive API or cookie fields, never field-name text');
+      !/const apiMembershipKnown = apiStates\.length > 0/.test(kugouText) ||
+      !/membershipVerified:\s*apiMembershipKnown/.test(kugouText) ||
+      !/const isWebRolePayload = membershipOrigin === 'kugou-web-roleinfo'/.test(kugouText) ||
+      !/const freshMembershipSource = isWebRolePayload \? 'kugou-web-roleinfo' : 'kugou-vip-api'/.test(kugouText) ||
+      !/membershipSource:\s*apiMembershipKnown[\s\S]*?freshMembershipSource[\s\S]*?'kugou-cookie-hint'/.test(kugouText)) {
+    fail('Kugou membership must come from account-scoped API entitlement records; cookies may only provide a non-authoritative hint');
   }
   if (!/function kugouPlaybackCacheScope/.test(kugouText) ||
       !/kugouPlaybackCacheScope\(auth, membership\)/.test(kugouText) ||
-      !/membership\.isVip \? '1' : '65530'/.test(kugouText)) {
-    fail('Kugou URL resolution must isolate caches by account and only send VIP mode for verified members');
+      !/function kugouVipCacheKey/.test(kugouText) ||
+      !/crypto\.createHash\('sha256'\)\.update\(identity\)\.digest\('hex'\)/.test(kugouText) ||
+      !/rights\.canPlaySvipTracks[\s\S]{0,180}rights\.canPlayVipTracks[\s\S]{0,180}rights\.canPlayMusicPackageTracks/.test(kugouText)) {
+    fail('Kugou membership and URL resolution caches must be isolated by the full account identity and verified entitlement tier');
   }
   if (!/kugouPlaybackParamsRequireVip\(params\)/.test(kugouText) ||
-      !/memberTrack && !membership\.isVip/.test(kugouText) ||
-      !/effectiveQuality = membership\.isVip \? requestedQuality : 'standard'/.test(kugouText)) {
+      !/const canAttemptMemberTrack = membershipRights\.canPlayVipTracks[\s\S]{0,100}membershipRights\.canPlayMusicPackageTracks/.test(kugouText) ||
+      !/memberTrack && !canAttemptMemberTrack/.test(kugouText) ||
+      !/function kugouMembershipRights/.test(kugouText) ||
+      !/function kugouEffectiveQuality/.test(kugouText) ||
+      !/if \(!rights\.canPlayVipTracks\) return 'standard'/.test(kugouText)) {
     fail('Kugou member tracks and premium qualities must be denied or downgraded for ordinary accounts');
   }
   if (!/api\/kugou\/song\/url/.test(serverText) || !/api\/qishui\/song\/url/.test(serverText) ||
@@ -2287,8 +2374,13 @@ function checkProviderEntitlementBoundaryGuard() {
   }
   if (!/function qishuiMembershipFromData/.test(qishuiText) ||
       !/function qishuiTrackRequiresVip/.test(qishuiText) ||
+      !/function qishuiStreamRequiredTier/.test(qishuiText) ||
+      !/function qishuiRequiredTierAllowed/.test(qishuiText) ||
+      !/QISHUI_TRACK_SVIP_KEYS/.test(qishuiText) ||
+      !/function qishuiApplyMembershipObservation/.test(qishuiText) ||
+      !/membership_unknown/.test(qishuiText) ||
       !/vip_required/.test(qishuiText)) {
-    fail('Qishui must strictly separate account membership from track-level VIP restrictions');
+    fail('Qishui must strictly separate account membership from track-level VIP/SVIP restrictions and retain only bounded official evidence');
   }
   if (!/verifiedMembership/.test(loginText) ||
       !/membershipSource === 'kugou-vip-api'/.test(loginText) ||
@@ -2337,19 +2429,38 @@ function checkQQVipStatusSyncGuard() {
       !/function qqPlaybackShowsMemberAccess[\s\S]{0,260}return false;/.test(loginStatusText)) {
     fail('QQ song hints and successful playback must not be promoted into persistent account VIP evidence');
   }
-  if (!/function refreshQQVipStatusNow/.test(loginStatusText) || !/function qqLoginNeedsAuthorizationRefresh/.test(loginStatusText) || !/forceVip=1/.test(loginStatusText) || !/window\.addEventListener\('focus'/.test(loginStatusText) || !/visibilitychange/.test(loginStatusText)) {
+  if (!/function refreshQQVipStatusNow/.test(loginStatusText) || !/function qqLoginNeedsAuthorizationRefresh/.test(loginStatusText) || !/function qqMembershipNeedsSync/.test(loginStatusText) || !/forceVip=1/.test(loginStatusText) || !/window\.addEventListener\('focus'/.test(loginStatusText) || !/visibilitychange/.test(loginStatusText)) {
     fail('QQ frontend must force VIP refresh on manual refresh and foreground return');
   }
-  if (!/membershipKnown === false/.test(loginStatusText) ||
+  if (!/membershipKnown !== true/.test(loginStatusText) ||
       !/Object\.assign\(\{\}, qqLoginStatus,[\s\S]{0,180}membershipStale:\s*true/.test(loginStatusText) ||
       /mergeQQPlaybackVipEvidence\(Object\.assign/.test(loginStatusText)) {
     fail('QQ frontend must keep last-known-good membership on transient failures and show unknown membership as pending');
   }
   if (!/openQQMusicLoginWindow\(owner, options\)/.test(mainText) ||
+      !/const initialCookie = await readQQLoginCookieHeader\(cookieSession\);[\s\S]{0,220}qqCookieHasPlaybackLogin\(initialCookie\)[\s\S]{0,260}options\.forceReauth/.test(mainText) ||
       !/options\.forceReauth[\s\S]{0,180}clearStorageData/.test(mainText) ||
       !/openQQMusicLogin:\s*\(options\)/.test(preloadText) ||
-      !/forceReauth:\s*!!\(qqLoginStatus && qqLoginStatus\.loggedIn\)/.test(loginFlowText)) {
-    fail('QQ membership resync must force a fresh official login instead of reusing a stale playback key');
+      !/forceReauth:\s*!!\(qqLoginStatus && qqLoginStatus\.authorizationIncomplete && qqLoginStatus\.playbackKeyReady === false\)/.test(loginFlowText) ||
+      /forceReauth:\s*!!\(qqLoginStatus && qqLoginStatus\.loggedIn\)/.test(loginFlowText)) {
+    fail('QQ reauthorization must only clear an explicitly incomplete playback session, never every logged-in session');
+  }
+  if (!/function isTrustedQQLoginUrl/.test(mainText) ||
+      !/action:\s*'allow'[\s\S]{0,500}partition:\s*QQ_LOGIN_PARTITION/.test(mainText) ||
+      !/playbackFinalizePending[\s\S]{0,700}setTimeout\(resolveDelay,\s*450\)/.test(mainText) ||
+      !/const showLoginWindow = \(\) =>[\s\S]{0,260}loginWindow\.show\(\)/.test(mainText) ||
+      !/showWatchdog = setTimeout\(showLoginWindow,\s*2500\)/.test(mainText) ||
+      !/const loadQQOfficialLoginEntry = async \(\) =>[\s\S]{0,700}cookieSession\.clearCache\(\)[\s\S]{0,420}QQ_LOGIN_FALLBACK_URL/.test(mainText) ||
+      /loginWindow\.loadURL\('https:\/\/y\.qq\.com\/n\/ryqq\/player'\)/.test(mainText) ||
+      !/function qqLoginCompletionFromCookie[\s\S]{0,500}QQ_PLAYBACK_AUTH_INCOMPLETE/.test(mainText) ||
+      !/resolve\(qqLoginCompletionFromCookie\(cookie\)\)/.test(mainText)) {
+    fail('QQ OAuth must stay in its official window, keep trusted popups on one partition, and reject web-only partial sessions');
+  }
+  if (!/async function fetchQQVipStatus[\s\S]{0,220}const musicKey = qqCookiePlaybackKey\(cookieObj\)/.test(serverText) ||
+      !/async function handleQQSongUrl[\s\S]{0,500}const playbackKey = qqCookiePlaybackKey\(cookieObj\);\s*const musicKey = playbackKey;/.test(serverText) ||
+      !/if \(!qqCookieUin\(obj\) \|\| !qqCookiePlaybackKey\(obj\)\)/.test(serverText) ||
+      !/function qqCookieUin[\s\S]{0,180}!!obj\.wxopenid[\s\S]{0,180}obj\.wxuin/.test(serverText)) {
+    fail('QQ VIP and vkey requests must use a strict QQ Music playback key and must not persist p_skey-only sessions');
   }
   if (!/cookieIsExpired/.test(mainText) || !/qqLoginCookieCandidateScore/.test(mainText) ||
       !/QQ_VKEY_REQUEST_TIMEOUT_MS = 6000/.test(serverText) ||
@@ -2360,8 +2471,10 @@ function checkQQVipStatusSyncGuard() {
   if (!/providerVipAuditSameUser/.test(loginStatusText) || !/已同步/.test(loginStatusText)) {
     fail('provider VIP audit must detect normal-to-VIP sync as well as VIP loss');
   }
-  if (!/qqLoginStatusText/.test(loginFlowText) || !/qqNeedsMembershipSync/.test(loginFlowText) || !/同步会员/.test(loginFlowText) || !/重新打开官方窗口同步会员/.test(loginFlowText) || !/qqNeedsAuthRefresh \|\| qqNeedsMembershipSync/.test(loginFlowText)) {
-    fail('QQ login panel must show membership-aware status and use reauthorization when the local QQ session is stale');
+  if (!/qqLoginStatusText/.test(loginFlowText) || !/qqNeedsMembershipSync/.test(loginFlowText) || !/同步会员/.test(loginFlowText) || !/重新打开官方窗口同步会员/.test(loginFlowText) ||
+      !/qqNeedsAuthRefresh \? openQQWebLogin : \(qqLoginStatus\.loggedIn \? refreshQr : openQQWebLogin\)/.test(loginFlowText) ||
+      /qqNeedsAuthRefresh \|\| qqNeedsMembershipSync/.test(loginFlowText)) {
+    fail('QQ login panel must reauthorize only missing playback credentials and use the forceVip status probe for membership sync');
   }
   if (!/pendingQQSync/.test(accountUtilsText) || !/待同步/.test(accountUtilsText) || !/\.top-account-vip\.pending/.test(cssText)) {
     fail('QQ top account badge must show pending sync instead of ordinary account when membership auth is stale');
@@ -2417,8 +2530,17 @@ async function checkProviderAuthCookiePathGuard() {
   if (!/STARTUP_SHOW_WATCHDOG_MS/.test(mainText) || !/function showMainWindowSafely\(win, reason\)/.test(mainText) || !/did-finish-load[\s\S]{0,160}showMainWindowSafely\(win/.test(mainText) || !/ready-to-show[\s\S]{0,120}showMainWindowSafely\(win/.test(mainText)) {
     fail('Main window must have ready-to-show, did-finish-load, and watchdog visibility fallbacks');
   }
-  if (!/withStartupTimeout\([\s\S]{0,180}win\.loadURL\(targetUrl\)/.test(mainText) || !/for \(let attempt = 1; attempt <= 2; attempt \+= 1\)/.test(mainText) || !/did-fail-load/.test(mainText) || !/render-process-gone/.test(mainText) || !/unresponsive/.test(mainText)) {
-    fail('Main window navigation must be bounded, retry once, and record renderer failure signals');
+  if (!/function createTrustedMainDocumentReadySignal\(win, expectedUrl\)/.test(mainText)
+    || !/isTrustedMainDocumentUrl\(candidateUrl\)/.test(mainText)
+    || !/Promise\.race\(\[observedLoadPromise, readySignal\.promise\]\)/.test(mainText)
+    || !/if \(readySignal\.isReady\(\)\) return;[\s\S]{0,100}webContents\.stop\(\)/.test(mainText)
+    || !/finally \{[\s\S]{0,80}readySignal\.cancel\(\)/.test(mainText)
+    || !/removeListener\('did-navigate'/.test(mainText)
+    || !/for \(let attempt = 1; attempt <= 2; attempt \+= 1\)/.test(mainText)
+    || !/did-fail-load/.test(mainText)
+    || !/render-process-gone/.test(mainText)
+    || !/unresponsive/.test(mainText)) {
+    fail('Main window navigation must accept a trusted committed document, clean up readiness listeners, retry once, and preserve real failure signals');
   }
   if (!/const failedWindow = mainWindow/.test(mainText) || !/failedWindow\.destroy\(\)/.test(mainText) || !/setImmediate\(\(\) => app\.quit\(\)\)/.test(mainText)) {
     fail('Startup failure must destroy the hidden BrowserWindow and release the single-instance lock');
@@ -2434,8 +2556,10 @@ async function checkProviderAuthCookiePathGuard() {
   if (singleInstanceBranch < 0 || mainText.slice(0, singleInstanceBranch).includes(startupStateCall) || !mainText.slice(singleInstanceBranch).includes(startupStateCall)) {
     fail('Secondary instances must quit before they can overwrite the primary startup-state.json');
   }
-  if (!/resolve\(qqCookieHasLogin\(cookie\)[\s\S]{0,140}partial: !qqCookieHasPlaybackLogin\(cookie\)/.test(mainText)) {
-    fail('QQ login must return partial:true when only web account cookies are available');
+  if (!/function qqLoginCompletionFromCookie[\s\S]{0,420}partial:\s*true[\s\S]{0,160}QQ_PLAYBACK_AUTH_INCOMPLETE/.test(mainText) ||
+      !/resolve\(qqLoginCompletionFromCookie\(cookie\)\)/.test(mainText) ||
+      /partial:\s*true,\s*cookie/.test(mainText)) {
+    fail('QQ login must report a web-only session as incomplete without returning its cookie for persistence');
   }
   if (/resolve\(neteaseCookieHasLogin\(cookie\)[\s\S]{0,140}!qqCookieHasPlaybackLogin/.test(mainText)) {
     fail('Netease login must not reuse QQ playback authorization checks');
@@ -2905,6 +3029,11 @@ function checkSonicTopographyPresetGuard() {
   const fxPanelText = fs.readFileSync(path.join(appRoot, 'public', 'js', 'modules', '07-fx', '05-fx-panel-performance.js'), 'utf8');
   const mainLoopText = fs.readFileSync(path.join(appRoot, 'public', 'js', 'modules', '11-main-loop.js'), 'utf8');
   const sonicText = fs.readFileSync(path.join(appRoot, 'public', 'sonic-topography-preset.js'), 'utf8');
+  const sonicWorkshopText = fs.readFileSync(path.join(appRoot, 'public', 'sonic-workshop-preset.js'), 'utf8');
+  const sonicWorkshopBridgeText = fs.readFileSync(path.join(appRoot, 'public', 'vendor', 'sonic-workshop', 'mineradio-bridge.html'), 'utf8');
+  const paletteText = fs.readFileSync(path.join(appRoot, 'public', 'js', 'modules', '02-visual', '07-lyrics-palette-text-utils.js'), 'utf8');
+  const accentControlText = fs.readFileSync(path.join(appRoot, 'public', 'js', 'modules', '07-fx', '02-accent-background-controls.js'), 'utf8');
+  const colorLabText = fs.readFileSync(path.join(appRoot, 'public', 'js', 'modules', '02-visual', '06-custom-background-colorlab.js'), 'utf8');
   const keyboardCameraText = fs.readFileSync(path.join(appRoot, 'public', 'js', 'modules', '04-shelf', '06-keyboard-camera-events.js'), 'utf8');
   const sonicAudioText = fs.readFileSync(path.join(appRoot, 'public', 'js', 'modules', '03-beat', '06-sonic-audio-monitor.js'), 'utf8');
   const defaultArchiveText = fs.readFileSync(path.join(appRoot, 'public', 'default-user-fx-archive.json'), 'utf8');
@@ -2946,6 +3075,23 @@ function checkSonicTopographyPresetGuard() {
     'sonicAudioBandEnd',
     'sonicAudioThreshold',
     'sonicAudioPulseStrength',
+    'sonicWorkshopInputGain',
+    'sonicWorkshopAudioIntensity',
+    'sonicWorkshopResponseRange',
+    'sonicWorkshopPeakIntensity',
+    'sonicWorkshopColorMode',
+    'sonicWorkshopTheme',
+    'sonicWorkshopCustomColor',
+    'sonicWorkshopBaseColorMode',
+    'sonicWorkshopBaseColor',
+    'sonicWorkshopWarmColorMode',
+    'sonicWorkshopWarmColor',
+    'sonicWorkshopCoolColorMode',
+    'sonicWorkshopCoolColor',
+    'sonicWorkshopRippleColorMode',
+    'sonicWorkshopRippleColor',
+    'sonicWorkshopPeakColorMode',
+    'sonicWorkshopPeakColor',
     'cameraViewSaved',
     'cameraViewMode',
     'cameraOrbitTheta',
@@ -2995,40 +3141,56 @@ function checkSonicTopographyPresetGuard() {
   if (!/function deriveGroundLayoutSettings/.test(sonicText) || !/sonicGroundRange/.test(sonicText) || !/state\.root\.rotation\.x\s*=\s*state\.boundRotX/.test(sonicText) || !/state\.root\.position\.set\(0,\s*layout\.y,\s*layout\.z\)/.test(sonicText) || !/state\.root\.scale\.setScalar\(layout\.scale\)/.test(sonicText)) {
     fail('Sonic Topography must expose a wide, lyric-safe horizontal platter layout inside Mineradio camera space');
   }
-  if (!/MAX_VISUAL_PRESET_INDEX = 7/.test(coreText)
-    || !/SONIC_PRESET_INDEX = 7/.test(coreText)
-    || !/LEGACY_REMOVED_VISUAL_PRESET_INDEX = 8/.test(coreText)
-    || !/preset === LEGACY_REMOVED_VISUAL_PRESET_INDEX\) return SONIC_PRESET_INDEX/.test(coreText)
-    || !/normalizeSavedVisualPresetIndex/.test(runtimeText + persistenceText + archiveText)) {
-    fail('Sonic preset 7 must remain selectable while legacy preset 8 archives migrate to it');
+  if (!/MAX_VISUAL_PRESET_INDEX = 8/.test(coreText) || !/SONIC_PRESET_INDEX = 7/.test(coreText) || !/SONIC_WORKSHOP_PRESET_INDEX = 8/.test(coreText) || !/MAX_VISUAL_PRESET_INDEX/.test(runtimeText + persistenceText)) {
+    fail('Sonic preset 7 and Workshop derivative preset 8 must survive autosave and startup restore clamps');
   }
-  if (!/音域回响/.test(archiveText)
-    || !/presetDisplayOrder = \[0, 6, 7, 5/.test(archiveText)
-    || /音域回响[\s\S]{0,120}disabled:\s*true/.test(archiveText)) {
+  if (!/音域回响/.test(archiveText) || !/presetDisplayOrder = \[0, 6, 7, 8/.test(archiveText) || /音域回响[\s\S]{0,120}disabled:\s*true/.test(archiveText)) {
     fail('Sonic Topography must be exposed as the selectable 音域回响 preset');
   }
   if (!archiveText.includes('音域回响 <span class="pc-name-en">Sonic-Topography</span>')
     || !archiveText.includes('作者 <span class="pc-author-ajin">Ajin</span>')
-    || /Wallpaper Engine<\/span>/.test(archiveText)
-    || /CmzYa/.test(archiveText)
+    || !archiveText.includes('音域回响 <span class="pc-name-en">Wallpaper Engine</span>')
+    || !archiveText.includes("desc: '作者 CmzYa'")
     || !/var name = p\.nameHtml \|\| p\.name/.test(presetGridText)
     || !/\.preset-card \.pc-name-en[\s\S]{0,260}font-size:\s*9px/.test(presetCssText)
     || !/\.preset-card \.pc-author-ajin[\s\S]{0,100}color:\s*#f59e0b/.test(presetCssText)) {
-    fail('The public Sonic preset card must preserve its own subtitle and Ajin author credit only');
+    fail('Sonic preset cards must preserve their English subtitles and Ajin/CmzYa author credits');
   }
   [
-    path.join(appRoot, 'public', 'sonic-workshop-preset.js'),
-    path.join(appRoot, 'public', 'vendor', 'sonic-workshop')
-  ].forEach((removedPath) => {
-    if (fs.existsSync(removedPath)) fail('Public release must not package the unlicensed Workshop derivative: ' + path.relative(appRoot, removedPath));
+    path.join(appRoot, 'public', 'vendor', 'sonic-workshop', 'assets', 'index-Z-j1MQ-r.js'),
+    path.join(appRoot, 'public', 'vendor', 'sonic-workshop', 'assets', 'index-Bhwp8mwk.css'),
+    path.join(appRoot, 'public', 'vendor', 'sonic-workshop', 'project.json'),
+    path.join(appRoot, 'public', 'vendor', 'sonic-workshop', 'preview.gif')
+  ].forEach((vendorFile) => {
+    if (!fs.existsSync(vendorFile)) fail('Sonic Workshop derivative preset is missing packaged Wallpaper Engine asset: ' + path.relative(appRoot, vendorFile));
   });
-  if (/sonic-workshop-preset\.js/.test(loaderText)
-    || /MineradioSonicWorkshop/.test(mainLoopText + presetGridText)
-    || /SONIC_WORKSHOP_PRESET_INDEX/.test(coreText + pointerText)) {
-    fail('Public release must not reference the removed Workshop derivative runtime');
+  if (!/sonic-workshop-preset\.js/.test(loaderText) || !/BRIDGE_SRC = 'vendor\/sonic-workshop\/mineradio-bridge\.html'/.test(sonicWorkshopText) || !/MineradioSonicWorkshop\.update/.test(mainLoopText) || !/visual\.sonic-workshop/.test(mainLoopText) || !/MineradioSonicWorkshop\.onPresetChange/.test(presetGridText) || !/workshopPresetActive/.test(mainLoopText)) {
+    fail('Sonic Workshop derivative preset must load, fade as preset 8, hide base particles, and update from the main loop');
+  }
+  if (!/canvasAnchor\.parentNode\.insertBefore\(layer,\s*canvasAnchor\)/.test(sonicWorkshopText) || !/layer\.setAttribute\('inert'/.test(sonicWorkshopText) || !/iframe\.setAttribute\('inert'/.test(sonicWorkshopText) || !/iframe\.style\.pointerEvents\s*=\s*'none'/.test(sonicWorkshopText) || !/#sonic-workshop-layer,\s*#sonic-workshop-layer \*[\s\S]{0,120}pointer-events:\s*none !important/.test(fs.readFileSync(path.join(appRoot, 'public', 'css', 'index.css'), 'utf8'))) {
+    fail('Sonic Workshop iframe layer must remain fully pointer-transparent so player buttons and window controls stay clickable');
+  }
+  if (!/wallpaperRegisterAudioListener/.test(sonicWorkshopBridgeText) || !/__mineradioApplyAudio/.test(sonicWorkshopBridgeText) || !/__mineradioApplyMedia/.test(sonicWorkshopBridgeText) || !/theme:\s*'coral-mirage'/.test(sonicWorkshopBridgeText) || !/themeCycleInterval:\s*50/.test(sonicWorkshopBridgeText) || !/gridSize:\s*320/.test(sonicWorkshopBridgeText) || !/audioIntensity:\s*1\.15/.test(sonicWorkshopBridgeText) || !/responseRange:\s*1\.3/.test(sonicWorkshopBridgeText) || !/peakColorIntensity:\s*0\.62/.test(sonicWorkshopBridgeText) || !/pulseSensitivity:\s*0\.05/.test(sonicWorkshopBridgeText) || !/pulseCooldown:\s*0/.test(sonicWorkshopBridgeText) || !/meteorSensitivity:\s*0\.3/.test(sonicWorkshopBridgeText) || !/cameraDistance:\s*80/.test(sonicWorkshopBridgeText) || !/autoRotateEnabled:\s*true/.test(sonicWorkshopBridgeText) || !/autoRotateSpeed:\s*7/.test(sonicWorkshopBridgeText) || !/cameraAngleX:\s*150/.test(sonicWorkshopBridgeText) || !/cameraAngleY:\s*30/.test(sonicWorkshopBridgeText) || !/showPlayerController:\s*false/.test(sonicWorkshopBridgeText)) {
+    fail('Sonic Workshop bridge must preserve the requested Wallpaper Engine default parameters and receive Mineradio audio/media');
+  }
+  const sonicWorkshopVendorText = fs.readFileSync(path.join(appRoot, 'public', 'vendor', 'sonic-workshop', 'assets', 'index-Z-j1MQ-r.js'), 'utf8');
+  if (!/mineradioCustomTheme/.test(sonicWorkshopBridgeText) || !/mineradioCustomTheme/.test(sonicWorkshopText) || !/function workshopCustomThemeForColor/.test(sonicWorkshopText) || !/function workshopPaletteHexesFromCover/.test(sonicWorkshopText) || !/function workshopCustomThemeForPalette/.test(sonicWorkshopText) || !/function workshopCustomThemeForRegions/.test(sonicWorkshopText) || !/function workshopRegionsFromFx/.test(sonicWorkshopText) || !/function applyWorkshopThemeTransition/.test(sonicWorkshopText) || !/WORKSHOP_THEME_TRANSITION_MS\s*=\s*1280/.test(sonicWorkshopText) || !/function applyThemeTransition/.test(sonicWorkshopBridgeText) || !/THEME_TRANSITION_STEP_MS\s*=\s*33/.test(sonicWorkshopBridgeText) || /scheduleWorkshopThemeTransition\(\);/.test(sonicWorkshopText) || !/__mineradioPaletteHexes/.test(sonicWorkshopText) || !/rawWarm/.test(paletteText + sonicWorkshopText) || !/rawCool/.test(paletteText + sonicWorkshopText) || !/rawAreaPrimary/.test(paletteText + sonicWorkshopText + accentControlText) || !/sonicWorkshopColors/.test(paletteText + sonicWorkshopText) || !/coverSourceKey/.test(paletteText + accentControlText) || !/function ensureSonicWorkshopCoverPaletteForUi/.test(accentControlText) || !/function sonicWorkshopCurrentCoverDomSource/.test(accentControlText) || !/function buildSonicWorkshopUiPaletteFromCanvas/.test(accentControlText) || !/function sonicWorkshopUiPaletteForKey/.test(accentControlText) || !/sonicWorkshopCoverUiSample\.palette/.test(accentControlText) || !/coverPickerCanvas/.test(accentControlText) || !/coverProxySrc/.test(accentControlText) || !/coverColors/.test(paletteText + sonicWorkshopText) || !/sonic-workshop-cool-picker/.test(indexText + fxBindText) || !/sonic-workshop-peak-picker/.test(indexText + fxBindText) || !/setSonicWorkshopRegionColorFromPicker/.test(fxBindText + sonicWorkshopText + accentControlText) || !/function sonicRawPaletteHex/.test(accentControlText) || /function sonicWorkshopCoverHex[\s\S]{0,700}sonicPaletteHex/.test(accentControlText) || !/uCoolCore:\s*cool/.test(sonicWorkshopText) || !/uRippleColor:\s*ripple/.test(sonicWorkshopText) || !/MRt\(We\.mineradioCustomTheme\.value\)/.test(sonicWorkshopVendorText) || !/Be\(function\(Mr\)\{return Mr===0\?1e-6:0\}\)/.test(sonicWorkshopVendorText)) {
+    fail('Sonic Workshop cover/custom colors must feed the real vendor terrain theme instead of only recoloring the UI controls');
+  }
+  if (!/colorLabState\.picker\)\s*colorLabState\.picker\.value\s*=\s*hex/.test(colorLabText) || !/id === 'sonic-workshop-cover-picker'[\s\S]{0,180}\^sonic-workshop-/.test(colorLabText) || !/pointerdown[\s\S]{0,180}updateColorLabFromSv\(e\)/.test(fxBindText) || !/function sonicWorkshopRegionControl\(id\)\s*\{[\s\S]{0,120}typeof id === 'object' && id\.id/.test(accentControlText) || !/function pushSonicWorkshopColorChange/.test(accentControlText) || !/function setSonicWorkshopThemeFromPicker[\s\S]{0,520}SONIC_WORKSHOP_COLOR_CONTROLS\.forEach/.test(accentControlText) || !/pushSonicWorkshopColorChange\(item\.colorKey\)/.test(accentControlText)) {
+    fail('Sonic Workshop color lab changes must commit into fx state, UI swatches, saved settings, and the live iframe theme');
   }
   if (!/function isPlaybackSpaceKey/.test(keyboardCameraText) || !/if \(isPlaybackSpaceKey\(e\)\) return;/.test(keyboardCameraText)) {
     fail('Space playback hotkey must not mark render interaction before resume playback');
+  }
+  if (!/global\.frequencyData/.test(sonicWorkshopText) || /sonicAudioMonitorState/.test(sonicWorkshopText) || /MineradioSonicWorkshop\.update\([\s\S]{0,260}audio:\s*sonicAudioFrame/.test(mainLoopText)) {
+    fail('Sonic Workshop derivative must use the local player analyser bridge instead of the original Sonic realtime spectrum frame');
+  }
+  if (!/WORKSHOP_AUDIO_TARGET_MAX_SAMPLE\s*=\s*0\.52/.test(sonicWorkshopText) || !/WORKSHOP_AUDIO_GAMMA\s*=\s*1\.55/.test(sonicWorkshopText) || !/WORKSHOP_AUDIO_MIN_FLOOR\s*=\s*0\.035/.test(sonicWorkshopText) || !/function workshopAudioFrameStats/.test(sonicWorkshopText) || !/function shapeWorkshopAudioValue/.test(sonicWorkshopText) || !/sonicWorkshopInputGain/.test(sonicWorkshopText) || /Math\.pow\(clamp01\(value\),\s*0\.68\)/.test(sonicWorkshopText) || /1\.05\s*\+\s*energy\s*\*\s*0\.34/.test(sonicWorkshopText)) {
+    fail('Sonic Workshop bridge must keep Wallpaper-like dark-field audio shaping instead of overdriving the terrain');
+  }
+  if (/getUserMedia|getDisplayMedia|desktopCapturer|MediaStream|D:\\\\Steam|workshop\\content/.test(sonicWorkshopText + sonicWorkshopBridgeText)) {
+    fail('Sonic Workshop derivative must use packaged assets and Mineradio analyser data instead of runtime capture or the Steam workshop path');
   }
   if (!/fx-sonicamp/.test(indexText) || !/fx-sonicrange/.test(indexText) || !/fx-sonicair/.test(indexText) || !/sonic-ground-base-picker/.test(indexText) || !/fx-sonicfloatcount/.test(indexText) || !/t-sonicGroundFloatingEnabled/.test(indexText) || !/音域地形/.test(indexText) || !/\^fx-sonic/.test(fxPanelText)) {
     fail('visual console must expose layout, color, ground EQ, and floating block controls for 音域回响');
@@ -4877,7 +5039,9 @@ function runMainStartupRecoveryCheck() {
   const appData = process.env.APPDATA;
   if (!appData) fail('APPDATA is required for the real main-entry startup recovery check');
   const runtimeName = `MineradioStartupQA-${process.pid}-${Date.now()}`;
-  const qaUserData = path.join(appData, runtimeName);
+  const qaUserDataParent = path.join(process.env.TEMP || appData, 'mineradio-startup-qa');
+  fs.mkdirSync(qaUserDataParent, { recursive: true });
+  const qaUserData = path.join(qaUserDataParent, runtimeName);
   const stateFile = path.join(qaUserData, 'startup-state.json');
   const qaSessionData = path.join('D:\\MineradioCache\\chromium', runtimeName);
   try {
@@ -4888,8 +5052,10 @@ function runMainStartupRecoveryCheck() {
         MINERADIO_RUNTIME_NAME: runtimeName,
         MINERADIO_APP_USER_MODEL_ID: 'com.mineradio.startup.qa',
         MINERADIO_NO_DESKTOP_SHORTCUT: '1',
+        MINERADIO_STARTUP_QA_USER_DATA: qaUserData,
         MINERADIO_STARTUP_TEST_SERVER_DELAY_MS: '4500',
         MINERADIO_STARTUP_TEST_FAIL_FIRST_NAV: '1',
+        MINERADIO_STARTUP_TEST_STALL_LOAD_PROMISE: '1',
         MINERADIO_STARTUP_QA_HIDDEN: '1',
         MINERADIO_STARTUP_QA_EXIT_MS: '700',
       },
@@ -4911,23 +5077,35 @@ function runMainStartupRecoveryCheck() {
     const windowVisibleAt = firstAt('window-visible');
     const serverReadyAt = firstAt('server-ready');
     const retryAt = firstAt('navigation-retry');
+    const navigationReadyAt = firstAt('navigation-ready');
     const readyAt = firstAt('ready');
+    const retryEvents = events.filter(item => item && item.phase === 'navigation-retry');
+    const navigationAttempts = events.filter(item => item && item.phase === 'navigation-attempt');
+    const secondNavigationAt = navigationAttempts[1] ? Number(navigationAttempts[1].at) || 0 : 0;
+    const failedAt = firstAt('failed');
     if (
       state.phase !== 'ready'
       || !windowCreatedAt
       || !windowVisibleAt
       || !serverReadyAt
       || !retryAt
+      || !navigationReadyAt
       || !readyAt
+      || retryEvents.length !== 1
+      || navigationAttempts.length !== 2
+      || !secondNavigationAt
+      || failedAt
       || windowVisibleAt >= serverReadyAt
       || readyAt <= retryAt
+      || navigationReadyAt < secondNavigationAt
+      || navigationReadyAt - secondNavigationAt >= 15000
       || windowVisibleAt - Number(state.startedAt || 0) > 5000
     ) {
-      fail(`Real main-entry startup recovery invariants failed: ${JSON.stringify({ state, windowCreatedAt, windowVisibleAt, serverReadyAt, retryAt, readyAt })}`);
+      fail(`Real main-entry startup recovery invariants failed: ${JSON.stringify({ state, windowCreatedAt, windowVisibleAt, serverReadyAt, retryAt, navigationReadyAt, readyAt, secondNavigationAt, failedAt })}`);
     }
-    console.log(`[OK] Startup shell visible in ${windowVisibleAt - state.startedAt}ms, before delayed server at ${serverReadyAt - state.startedAt}ms; injected first navigation failure recovered and reached ready in ${readyAt - state.startedAt}ms.`);
+    console.log(`[OK] Startup shell visible in ${windowVisibleAt - state.startedAt}ms; injected first navigation failure recovered, stalled loadURL Promise was accepted by trusted navigation readiness in ${navigationReadyAt - secondNavigationAt}ms.`);
   } finally {
-    if (fs.existsSync(qaUserData)) removeOwnedStartupQaDirectory(qaUserData, appData, runtimeName);
+    if (fs.existsSync(qaUserData)) removeOwnedStartupQaDirectory(qaUserData, qaUserDataParent, runtimeName);
     const qaSessionParent = path.dirname(qaSessionData);
     if (fs.existsSync(qaSessionData)) removeOwnedStartupQaDirectory(qaSessionData, qaSessionParent, runtimeName);
   }
@@ -5241,6 +5419,8 @@ async function main() {
   runNodeSyntaxCheck(jsCheckFiles());
   runPlaybackAudioGraphRegressionCheck();
   runPlaybackSourceFallbackTransactionCheck();
+  runLocalMusicLibraryRegressionCheck();
+  runWallpaperEngineIdleDisposeRegressionCheck();
   runQQVipEntitlementRegressionCheck();
   runLoginEasterEggGateRegressionCheck();
   runQishuiProviderDistributionRegressionCheck();
@@ -5260,6 +5440,7 @@ async function main() {
   checkLyricBackfaceMaterialGuard();
   checkLyricScrollPerformanceGuard();
   checkPersistentCacheStorageGuard();
+  checkExternalUpdatePageBridgeGuard();
   checkLyricTranslationCompletenessGuard();
   checkLyricVerticalFloatToggleGuard();
   checkQishuiProviderGuard();

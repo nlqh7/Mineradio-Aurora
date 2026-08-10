@@ -60,7 +60,6 @@ const fs   = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const tls = require('tls');
-const { once } = require('events');
 const { fileURLToPath } = require('url');
 const { analyzePodcastDjStream, analyzePodcastDjIntro } = require('./dj-analyzer');
 const { TrackDecryptor } = require('./qishui-audio-decryptor/track-decryptor');
@@ -69,6 +68,8 @@ const {
   resolveQQVipFromProbes,
   qqVipSessionCacheKey,
   qqVipCacheTtlMs,
+  qqVipEntitlementRights,
+  preserveQQVipStalePositive,
   qqVipObjectLooksExpired: qqVipObjectLooksExpiredStrict,
 } = require('./qq-vip-api');
 const {
@@ -83,6 +84,7 @@ const {
   handleKugouPlaylistAddSong,
   getKugouLoginInfo,
   normalizeKugouCookieInput,
+  clearKugouSessionCaches,
   kugouCookieHasPlayback,
   extractKugouAuth,
   kugouAudioReferer,
@@ -92,7 +94,6 @@ const {
   handleQishuiStatus,
   normalizeQishuiCookieInput,
   qishuiCookieHasLogin,
-  saveQishuiAccessToken,
   clearQishuiAccessToken,
   handleQishuiSearch,
   handleQishuiFeed,
@@ -109,6 +110,7 @@ const {
   handleQishuiLyric,
   handleQishuiSongUrl,
 } = require('./qishui-api');
+const qishuiQrLogin = require('./qishui-qr-login');
 const {
   getSpotifyConfig,
   clearSpotifyToken,
@@ -135,10 +137,7 @@ const { planCuefieldTransitionFromCache } = require('./cuefield/mineradio-bridge
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const LOGIN_EASTER_EGG_GATE_FILE = String(process.env.MINERADIO_LOGIN_EASTER_EGG_GATE_FILE || '');
-const LOGIN_EASTER_EGG_GATE_VERSION = String(
-  process.env.MINERADIO_LOGIN_EASTER_EGG_GATE_VERSION ||
-  String.fromCharCode(119, 111, 114, 108, 100, 45, 112, 101, 97, 99, 101, 45, 118, 49),
-);
+const LOGIN_EASTER_EGG_GATE_VERSION = String(process.env.MINERADIO_LOGIN_EASTER_EGG_GATE_VERSION || 'world-peace-v1');
 const LOGIN_EASTER_EGG_PROTECTED_ROUTES = new Set([
   '/api/login/cookie',
   '/api/login/qr/key',
@@ -146,8 +145,8 @@ const LOGIN_EASTER_EGG_PROTECTED_ROUTES = new Set([
   '/api/login/qr/check',
   '/api/qq/login/cookie',
   '/api/kugou/login/cookie',
-  '/api/qishui/login/token',
-  '/api/qishui/login/cookie',
+  '/api/qishui/login/qrcode',
+  '/api/qishui/login/check',
   '/api/spotify/config',
 ]);
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -155,27 +154,20 @@ const DEFAULT_COOKIE_FILE = path.join(__dirname, '.cookie');
 const DEFAULT_QQ_COOKIE_FILE = path.join(__dirname, '.qq-cookie');
 const DEFAULT_KUGOU_COOKIE_FILE = path.join(__dirname, '.kugou-cookie');
 const DEFAULT_QISHUI_COOKIE_FILE = path.join(__dirname, '.qishui-cookie');
-const UPDATE_WORK_DIR = process.env.MINERADIO_UPDATE_DIR || path.join(__dirname, 'updates');
-const UPDATE_DOWNLOAD_DIR = process.env.MINERADIO_UPDATE_DOWNLOAD_DIR || path.join(UPDATE_WORK_DIR, 'downloads');
-const UPDATE_PATCH_BACKUP_DIR = process.env.MINERADIO_PATCH_BACKUP_DIR || path.join(UPDATE_WORK_DIR, 'backups', 'patches');
 const BEATMAP_CACHE_DIR = process.env.MINERADIO_BEAT_CACHE_DIR || 'D:\\MineradioCache\\beatmaps';
 const CUEFIELD_FEEDBACK_FILE = process.env.CUEFIELD_FEEDBACK_FILE || path.join(__dirname, 'data', 'cuefield-feedback.jsonl');
 const LISTEN_SYNC_JOURNAL_FILE = process.env.MINERADIO_LISTEN_SYNC_FILE || path.join(__dirname, 'data', 'listen-sync-journal.json');
 const LISTEN_SYNC_JOURNAL_LIMIT = 600;
 const APP_PACKAGE = readPackageInfo();
-const APP_VERSION = process.env.MINERADIO_VERSION || APP_PACKAGE.version || '2.0.2';
+const APP_VERSION = process.env.MINERADIO_VERSION || APP_PACKAGE.version || '2.1.0';
 const UPDATE_CONFIG = readUpdateConfig(APP_PACKAGE);
-const PATCH_MAX_BYTES = 12 * 1024 * 1024;
-const PATCH_ALLOWED_ROOTS = new Set(['public', 'desktop', 'build']);
 const qishuiAudioDecryptor = new TrackDecryptor();
 const qishuiAudioDecryptCache = new Map();
 const QISHUI_AUDIO_DECRYPT_CACHE_MAX_BYTES = 96 * 1024 * 1024;
 let qishuiAudioDecryptCacheBytes = 0;
-const PATCH_ALLOWED_FILES = new Set(['server.js', 'dj-analyzer.js', 'package.json', 'package-lock.json']);
 const UPDATE_FALLBACK_NOTES = [
-  '电影镜头节奏更松',
-  '音源失败自动换源',
-  '右上角更新提示',
+  '修复多行歌词与 3D 歌单架的显示层级',
+  '优化更新入口与安装包获取流程',
 ];
 const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 const OPEN_METEO_GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
@@ -187,8 +179,6 @@ const WEATHER_DEFAULT_LOCATION = {
   longitude: 121.4737,
   timezone: 'Asia/Shanghai',
 };
-
-const updateDownloadJobs = new Map();
 
 function loadListenSyncJournal() {
   try {
@@ -382,6 +372,7 @@ function saveQQCookie(c) {
 let kugouCookie = '';
 function saveKugouCookie(c) {
   kugouCookie = saveConfiguredCookieStore(configuredCookieStores.kugou, normalizeCookieHeader(c) || rawCookieFallback(c));
+  clearKugouSessionCaches();
 }
 
 let qishuiCookie = '';
@@ -411,6 +402,7 @@ function clearAllRuntimeLoginCredentials(reason) {
   clearNeteaseLoginInfoCache();
   qqVipInfoCache.clear();
   clearQQLikedPlaylistCoverCache();
+  clearKugouSessionCaches();
   const qishui = clearQishuiAccessToken();
   const spotify = clearSpotifyToken();
   return {
@@ -523,19 +515,6 @@ function readUpdateMirrors(local) {
   });
   return mirrors.slice(0, 6);
 }
-function normalizeDigest(value, algorithm) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  const prefix = new RegExp('^' + algorithm + ':', 'i');
-  return raw.replace(prefix, '').trim().replace(/^['"]|['"]$/g, '');
-}
-function assetDigestInfo(asset) {
-  const digest = String(asset && asset.digest || '').trim();
-  return {
-    sha256: normalizeDigest((asset && asset.sha256) || (/^sha256:/i.test(digest) ? digest : ''), 'sha256').toLowerCase(),
-    sha512: normalizeDigest((asset && asset.sha512) || (/^sha512:/i.test(digest) ? digest : ''), 'sha512'),
-  };
-}
 function buildMirrorUrl(originalUrl, mirror) {
   const source = String(originalUrl || '').trim();
   const base = String(mirror || '').trim();
@@ -576,11 +555,6 @@ function uniqueDownloadCandidates(urls, opts) {
     return true;
   });
 }
-function publicDownloadUrls(candidates) {
-  return (Array.isArray(candidates) ? candidates : [])
-    .map(item => item && item.url)
-    .filter(Boolean);
-}
 function normalizeVersion(value) {
   return String(value || '').trim().replace(/^v/i, '').replace(/[+].*$/, '').replace(/-.+$/, '');
 }
@@ -608,78 +582,71 @@ function cleanReleaseLine(line) {
 function extractReleaseNotes(body) {
   const notes = [];
   String(body || '').split(/\r?\n/).forEach(line => {
+    if (/<!--[\s\S]*?-->/i.test(line)) return;
     const text = cleanReleaseLine(line);
     if (!text) return;
     if (/^(what'?s changed|changes|changelog|full changelog|更新日志)$/i.test(text)) return;
-    if (/^https?:\/\//i.test(text)) return;
+    if (/https?:\/\//i.test(text)) return;
+    if (/^(下载|网盘|夸克盘|百度(?:云|网盘)|蓝奏(?:云|网盘)|安装包)/i.test(text)) return;
     if (text.length > 72) return;
     notes.push(text);
   });
   return notes.slice(0, 4);
 }
-function pickReleaseAsset(assets) {
-  const list = Array.isArray(assets) ? assets : [];
-  const preferred = list.find(a => /\.(exe|msi)$/i.test(a && a.name || ''))
-    || list.find(a => /\.(zip|7z)$/i.test(a && a.name || ''))
-    || list[0];
-  if (!preferred) return null;
-  const digest = assetDigestInfo(preferred);
-  const candidates = uniqueDownloadCandidates(preferred.browser_download_url || '');
-  return {
-    name: preferred.name || '',
-    size: preferred.size || 0,
-    contentType: preferred.content_type || '',
-    downloadUrl: preferred.browser_download_url || '',
-    downloadUrls: publicDownloadUrls(candidates),
-    sha256: digest.sha256 || '',
-    sha512: digest.sha512 || '',
-  };
-}
-function patchAssetVersions(name) {
-  const matches = String(name || '').match(/\d+(?:[._-]\d+){1,3}/g) || [];
-  return matches.map(item => normalizeVersion(item.replace(/[._-]/g, '.'))).filter(Boolean);
-}
-function pickPatchAsset(assets, currentVersion, latestVersion) {
-  const list = Array.isArray(assets) ? assets : [];
-  const current = normalizeVersion(currentVersion || APP_VERSION);
-  const latest = normalizeVersion(latestVersion || '');
-  const preferred = list.find(a => {
-    const name = String(a && a.name || '');
-    if (!/\.(patch\.json|patch|json)$/i.test(name)) return false;
-    const versions = patchAssetVersions(name);
-    if (latest) return versions[0] === current && versions[versions.length - 1] === latest;
-    return versions[0] === current && name.toLowerCase().includes('patch');
-  }) || list.find(a => {
-    const name = String(a && a.name || '');
-    if (!/\.(patch\.json|patch|json)$/i.test(name)) return false;
-    const versions = patchAssetVersions(name);
-    return versions[0] === current && name.toLowerCase().includes('patch');
-  }) || list.find(a => /\.(patch\.json|patch)$/i.test(a && a.name || ''));
-  if (!preferred) return null;
-  const digest = assetDigestInfo(preferred);
-  const candidates = uniqueDownloadCandidates(preferred.browser_download_url || '');
-  return {
-    name: preferred.name || '',
-    size: preferred.size || 0,
-    contentType: preferred.content_type || '',
-    downloadUrl: preferred.browser_download_url || '',
-    downloadUrls: publicDownloadUrls(candidates),
-    sha256: digest.sha256 || '',
-    sha512: digest.sha512 || '',
-  };
-}
-function updateAssetNameFromUrl(value) {
+function safeExternalUpdateUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.length > 2048) return '';
   try {
-    const u = new URL(String(value || ''));
-    const base = path.basename(decodeURIComponent(u.pathname || ''));
-    if (base) return base;
-  } catch (_) {}
-  return path.basename(String(value || '').split('?')[0]) || '';
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'https:') return '';
+    return parsed.toString();
+  } catch (_) {
+    return '';
+  }
+}
+function normalizeUpdateDownloadPages(values, fallbackLabel) {
+  const source = Array.isArray(values) ? values : (values ? [values] : []);
+  const seen = new Set();
+  const pages = [];
+  source.forEach((value, index) => {
+    const item = value && typeof value === 'object' ? value : { url: value };
+    const url = safeExternalUpdateUrl(item.url || item.href || item.downloadPageUrl || item.externalUrl || '');
+    if (!url || seen.has(url)) return;
+    const label = cleanReleaseLine(item.label || item.name || fallbackLabel || `下载线路 ${index + 1}`)
+      .replace(/[<>|]/g, '')
+      .slice(0, 24)
+      .trim() || `下载线路 ${index + 1}`;
+    seen.add(url);
+    pages.push({ label, url });
+  });
+  return pages.slice(0, 6);
+}
+function extractReleaseDownloadPages(body) {
+  const raw = String(body || '');
+  const pages = [];
+  const hiddenPattern = /<!--\s*mineradio-download-page\s*:\s*(?:([^|<>\r\n]{1,32})\s*\|\s*)?(https:\/\/[^\s<>]+)\s*-->/gi;
+  let hidden = null;
+  while ((hidden = hiddenPattern.exec(raw))) {
+    pages.push({
+      label: String(hidden[1] || '').trim(),
+      url: hidden[2],
+    });
+  }
+  if (pages.length) return normalizeUpdateDownloadPages(pages);
+  const visiblePattern = /^\s*[-*]?\s*(夸克盘|百度(?:云|网盘)|蓝奏(?:云|网盘)|网盘|下载(?:地址|页面|链接)?)\s*[:：]\s*(?:\[[^\]]*]\()?(https:\/\/[^\s<>)\]]+)/gmi;
+  let visible = null;
+  while ((visible = visiblePattern.exec(raw))) {
+    pages.push({ label: visible[1], url: visible[2] });
+  }
+  return normalizeUpdateDownloadPages(pages);
+}
+function extractReleaseDownloadPage(body) {
+  const pages = extractReleaseDownloadPages(body);
+  return pages.length ? pages[0].url : '';
 }
 function normalizeManifestUpdateInfo(data) {
   data = data || {};
   const release = data.release || {};
-  const asset = release.asset || data.asset || {};
   const latestVersion = normalizeVersion(
     data.latestVersion
     || data.version
@@ -689,33 +656,28 @@ function normalizeManifestUpdateInfo(data) {
     || release.name
     || APP_VERSION
   ) || APP_VERSION;
-  const downloadUrl = release.downloadUrl || data.downloadUrl || asset.downloadUrl || asset.browser_download_url || '';
-  const patch = release.patch || data.patch || null;
-  const assetUrls = [downloadUrl].concat(Array.isArray(asset.downloadUrls) ? asset.downloadUrls : []);
-  const patchUrls = patch ? [patch.downloadUrl].concat(Array.isArray(patch.downloadUrls) ? patch.downloadUrls : []) : [];
-  const patchInfo = patch && patch.downloadUrl ? {
-    name: patch.name || updateAssetNameFromUrl(patch.downloadUrl) || `Mineradio-${APP_VERSION}→${latestVersion}.patch.json`,
-    size: Number(patch.size || 0) || 0,
-    contentType: patch.contentType || patch.content_type || 'application/json',
-    downloadUrl: patch.downloadUrl,
-    downloadUrls: publicDownloadUrls(uniqueDownloadCandidates(patchUrls)),
-    from: normalizeVersion(patch.from || APP_VERSION),
-    to: normalizeVersion(patch.to || latestVersion),
-    sha256: normalizeDigest(patch.sha256 || '', 'sha256').toLowerCase(),
-    sha512: normalizeDigest(patch.sha512 || '', 'sha512'),
-  } : null;
+  const htmlUrl = safeExternalUpdateUrl(release.htmlUrl || release.html_url || data.htmlUrl || '');
+  const legacyExternalUrl = safeExternalUpdateUrl(
+    release.downloadPageUrl
+    || release.externalUrl
+    || data.downloadPageUrl
+    || data.externalUrl
+    || release.downloadUrl
+    || data.downloadUrl
+    || ''
+  );
+  const downloadPages = normalizeUpdateDownloadPages(
+    release.downloadPages || data.downloadPages || [],
+    '网盘下载'
+  );
+  if (legacyExternalUrl && !downloadPages.some(page => page.url === legacyExternalUrl)) {
+    downloadPages.unshift({ label: '网盘下载', url: legacyExternalUrl });
+  }
+  const externalUrl = downloadPages.length ? downloadPages[0].url : legacyExternalUrl;
+  const downloadPageUrl = externalUrl || htmlUrl;
   const notes = Array.isArray(release.notes) && release.notes.length
     ? release.notes.slice(0, 4).map(cleanReleaseLine).filter(Boolean)
     : (extractReleaseNotes(release.body || data.body).length ? extractReleaseNotes(release.body || data.body) : UPDATE_FALLBACK_NOTES);
-  const assetInfo = downloadUrl ? {
-    name: asset.name || updateAssetNameFromUrl(downloadUrl) || `Mineradio-${latestVersion}-Setup.exe`,
-    size: Number(asset.size || 0) || 0,
-    contentType: asset.contentType || asset.content_type || '',
-    downloadUrl,
-    downloadUrls: publicDownloadUrls(uniqueDownloadCandidates(assetUrls)),
-    sha256: normalizeDigest(asset.sha256 || '', 'sha256').toLowerCase(),
-    sha512: normalizeDigest(asset.sha512 || release.sha512 || data.sha512 || '', 'sha512'),
-  } : null;
   return {
     configured: true,
     preview: false,
@@ -727,11 +689,14 @@ function normalizeManifestUpdateInfo(data) {
       name: release.name || data.name || ('Mineradio v' + latestVersion),
       version: latestVersion,
       publishedAt: release.publishedAt || release.published_at || data.publishedAt || '',
-      htmlUrl: release.htmlUrl || release.html_url || data.htmlUrl || '',
-      downloadUrl,
-      asset: assetInfo,
-      patch: patchInfo,
-      patchAvailable: !!(patchInfo && patchInfo.downloadUrl && compareVersions(latestVersion, APP_VERSION) > 0),
+      htmlUrl,
+      externalUrl,
+      downloadPageUrl,
+      downloadPages,
+      downloadUrl: externalUrl,
+      asset: null,
+      patch: null,
+      patchAvailable: false,
       summary: release.summary || data.summary || notes[0] || '发现新版本，建议更新。',
       notes,
     },
@@ -838,7 +803,13 @@ function localUpdateFallback(reason, opts) {
       name: 'Mineradio v' + APP_VERSION,
       version: APP_VERSION,
       htmlUrl: '',
+      externalUrl: '',
+      downloadPageUrl: '',
+      downloadPages: [],
       downloadUrl: '',
+      asset: null,
+      patch: null,
+      patchAvailable: false,
       summary: '当前版本，更新检测已就绪。',
       notes: UPDATE_FALLBACK_NOTES,
     },
@@ -945,30 +916,10 @@ function yamlScalar(text, key) {
   if (!match) return '';
   return match[1].trim().replace(/^['"]|['"]$/g, '');
 }
-function githubReleaseDownloadUrl(version, fileName) {
-  const tag = 'v' + normalizeVersion(version);
-  const encodedOwner = encodeURIComponent(UPDATE_CONFIG.owner);
-  const encodedRepo = encodeURIComponent(UPDATE_CONFIG.repo);
-  const encodedName = String(fileName || '').split('/').map(part => encodeURIComponent(part)).join('/');
-  return `https://github.com/${encodedOwner}/${encodedRepo}/releases/download/${tag}/${encodedName}`;
-}
 function parseLatestYmlUpdateInfo(text, reason) {
   const latestVersion = normalizeVersion(yamlScalar(text, 'version') || APP_VERSION) || APP_VERSION;
-  const assetPath = yamlScalar(text, 'path') || yamlScalar(text, 'url') || `Mineradio-${latestVersion}-Setup.exe`;
-  const sha512 = normalizeDigest(yamlScalar(text, 'sha512'), 'sha512');
-  const size = Number(yamlScalar(text, 'size') || 0) || 0;
   const releaseDate = yamlScalar(text, 'releaseDate');
-  const downloadUrl = githubReleaseDownloadUrl(latestVersion, assetPath);
-  const candidates = uniqueDownloadCandidates(downloadUrl);
-  const asset = {
-    name: updateAssetNameFromUrl(downloadUrl) || assetPath,
-    size,
-    contentType: 'application/octet-stream',
-    downloadUrl,
-    downloadUrls: publicDownloadUrls(candidates),
-    sha256: '',
-    sha512,
-  };
+  const htmlUrl = `https://github.com/${UPDATE_CONFIG.owner}/${UPDATE_CONFIG.repo}/releases/tag/v${latestVersion}`;
   return {
     configured: true,
     preview: false,
@@ -980,13 +931,16 @@ function parseLatestYmlUpdateInfo(text, reason) {
       name: 'Mineradio v' + latestVersion,
       version: latestVersion,
       publishedAt: releaseDate,
-      htmlUrl: `https://github.com/${UPDATE_CONFIG.owner}/${UPDATE_CONFIG.repo}/releases/tag/v${latestVersion}`,
-      downloadUrl,
-      asset,
+      htmlUrl,
+      externalUrl: '',
+      downloadPageUrl: htmlUrl,
+      downloadPages: [],
+      downloadUrl: '',
+      asset: null,
       patch: null,
       patchAvailable: false,
-      summary: '发现新版本，已启用备用更新线路。',
-      notes: ['更新检测已切换到备用线路', '下载时会自动选择国内加速线路', '下载失败会显示具体原因和当前速度'],
+      summary: '发现新版本，请前往发布页面获取安装包。',
+      notes: ['更新入口已改为浏览器外部下载', 'Mineradio 不再在本地下载或应用补丁'],
     },
     source: 'latest-yml',
     reason: reason || '',
@@ -1019,8 +973,10 @@ async function fetchLatestUpdateInfo() {
     }
     const data = await resp.json();
     const latestVersion = normalizeVersion(data.tag_name || data.name || APP_VERSION) || APP_VERSION;
-    const asset = pickReleaseAsset(data.assets);
-    const patch = pickPatchAsset(data.assets, APP_VERSION, latestVersion);
+    const htmlUrl = safeExternalUpdateUrl(data.html_url || '');
+    const downloadPages = extractReleaseDownloadPages(data.body);
+    const externalUrl = downloadPages.length ? downloadPages[0].url : '';
+    const downloadPageUrl = externalUrl || htmlUrl;
     const notes = extractReleaseNotes(data.body).length ? extractReleaseNotes(data.body) : UPDATE_FALLBACK_NOTES;
     return {
       configured: true,
@@ -1033,11 +989,14 @@ async function fetchLatestUpdateInfo() {
         name: data.name || ('Mineradio v' + latestVersion),
         version: latestVersion,
         publishedAt: data.published_at || '',
-        htmlUrl: data.html_url || '',
-        downloadUrl: asset ? asset.downloadUrl : '',
-        asset,
-        patch,
-        patchAvailable: !!(patch && patch.downloadUrl && compareVersions(latestVersion, APP_VERSION) > 0),
+        htmlUrl,
+        externalUrl,
+        downloadPageUrl,
+        downloadPages,
+        downloadUrl: externalUrl,
+        asset: null,
+        patch: null,
+        patchAvailable: false,
         summary: notes[0] || '发现新版本，建议更新。',
         notes,
       },
@@ -1049,614 +1008,6 @@ async function fetchLatestUpdateInfo() {
   } finally {
     clearTimeout(timer);
   }
-}
-function safeUpdateFileName(name, version) {
-  const raw = String(name || '').trim() || `Mineradio-${version || APP_VERSION}.exe`;
-  const cleaned = raw
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 160);
-  return cleaned || `Mineradio-${version || APP_VERSION}.exe`;
-}
-function publicUpdateJob(job) {
-  if (!job) return { ok: false, error: 'UPDATE_JOB_NOT_FOUND' };
-  return {
-    ok: job.status !== 'error',
-    id: job.id,
-    status: job.status,
-    progress: job.progress || 0,
-    received: job.received || 0,
-    total: job.total || 0,
-    speedBps: job.speedBps || 0,
-    etaSeconds: job.etaSeconds || 0,
-    sourceLabel: job.sourceLabel || '',
-    attempt: job.attempt || 0,
-    attempts: job.attempts || 0,
-    mode: job.mode || 'installer',
-    message: job.message || '',
-    restartRequired: !!job.restartRequired,
-    cached: !!job.cached,
-    fileName: job.fileName || '',
-    filePath: job.status === 'ready' ? job.filePath : '',
-    version: job.version || '',
-    releaseUrl: job.releaseUrl || '',
-    error: job.error || '',
-    errorReason: job.errorReason || '',
-    errorDetail: job.errorDetail || '',
-    failedAttempts: Array.isArray(job.failedAttempts) ? job.failedAttempts.slice(0, 6) : [],
-    createdAt: job.createdAt,
-    updatedAt: job.updatedAt,
-  };
-}
-function activeUpdateJobFor(version) {
-  const jobs = Array.from(updateDownloadJobs.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  return jobs.find(job => job.version === version && (job.status === 'queued' || job.status === 'downloading' || job.status === 'ready'));
-}
-function trimUpdateJobs() {
-  const jobs = Array.from(updateDownloadJobs.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  jobs.slice(8).forEach(job => updateDownloadJobs.delete(job.id));
-}
-async function downloadUpdateAsset(job) {
-  const tmpPath = job.filePath + '.download';
-  try {
-    fs.mkdirSync(UPDATE_DOWNLOAD_DIR, { recursive: true });
-    job.status = 'downloading';
-    job.updatedAt = Date.now();
-
-    const resp = await fetch(job.downloadUrl, {
-      headers: {
-        'User-Agent': `Mineradio/${APP_VERSION}`,
-      },
-    });
-    if (!resp.ok) throw new Error('Download failed ' + resp.status);
-
-    const totalHeader = parseInt(resp.headers.get('content-length') || '0', 10) || 0;
-    job.total = totalHeader || job.total || 0;
-    job.received = 0;
-    job.progress = 0;
-    job.speedBps = 0;
-    job.etaSeconds = 0;
-    job.message = job.total ? '正在下载完整安装包' : '正在下载完整安装包，等待服务器返回大小';
-    job.updatedAt = Date.now();
-    let speedWindowAt = Date.now();
-    let speedWindowBytes = 0;
-
-    const writer = fs.createWriteStream(tmpPath);
-    const reader = resp.body.getReader();
-    try {
-      while (true) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        const buf = Buffer.from(chunk.value);
-        job.received += buf.length;
-        speedWindowBytes += buf.length;
-        const now = Date.now();
-        if (now - speedWindowAt >= 900) {
-          job.speedBps = Math.round(speedWindowBytes / Math.max(0.001, (now - speedWindowAt) / 1000));
-          speedWindowAt = now;
-          speedWindowBytes = 0;
-        }
-        if (job.total > 0) {
-          job.progress = Math.max(1, Math.min(99, Math.round((job.received / job.total) * 100)));
-          job.etaSeconds = job.speedBps > 0 ? Math.max(0, Math.round((job.total - job.received) / job.speedBps)) : 0;
-        } else {
-          const kb = Math.max(1, job.received / 1024);
-          job.progress = Math.max(1, Math.min(88, Math.round(Math.log10(kb + 1) * 24)));
-        }
-        job.message = job.total > 0 ? '正在下载完整安装包' : '正在下载完整安装包，服务器未提供总大小';
-        job.updatedAt = Date.now();
-        if (!writer.write(buf)) await once(writer, 'drain');
-      }
-    } finally {
-      writer.end();
-      await once(writer, 'finish').catch(() => {});
-    }
-
-    if (fs.existsSync(job.filePath)) fs.unlinkSync(job.filePath);
-    fs.renameSync(tmpPath, job.filePath);
-    job.status = 'ready';
-    job.progress = 100;
-    job.message = '安装包已下载';
-    job.updatedAt = Date.now();
-  } catch (e) {
-    try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) {}
-    job.status = 'error';
-    job.error = e.message || 'UPDATE_DOWNLOAD_FAILED';
-    job.updatedAt = Date.now();
-  }
-}
-function sha512Base64(buffer) {
-  return crypto.createHash('sha512').update(buffer).digest('base64');
-}
-function sha512Hex(buffer) {
-  return crypto.createHash('sha512').update(buffer).digest('hex');
-}
-function verifyUpdateBuffer(buffer, job) {
-  const expectedSize = Number(job.expectedSize || job.total || 0) || 0;
-  if (expectedSize > 0 && buffer.length !== expectedSize) {
-    throw updateError('UPDATE_SIZE_MISMATCH', `Expected ${expectedSize} bytes, got ${buffer.length}`);
-  }
-  const expectedSha256 = normalizeDigest(job.sha256 || '', 'sha256').toLowerCase();
-  if (expectedSha256 && sha256Hex(buffer) !== expectedSha256) {
-    throw updateError('UPDATE_SHA256_MISMATCH', 'Downloaded sha256 mismatch');
-  }
-  const expectedSha512 = normalizeDigest(job.sha512 || '', 'sha512');
-  if (expectedSha512) {
-    const actualBase64 = sha512Base64(buffer);
-    const actualHex = sha512Hex(buffer).toLowerCase();
-    if (actualBase64 !== expectedSha512 && actualHex !== expectedSha512.toLowerCase()) {
-      throw updateError('UPDATE_SHA512_MISMATCH', 'Downloaded sha512 mismatch');
-    }
-  }
-}
-function verifyUpdateFile(filePath, job) {
-  verifyUpdateBuffer(fs.readFileSync(filePath), job);
-}
-function moveInvalidUpdateFile(filePath, reason) {
-  try {
-    if (!filePath || !fs.existsSync(filePath)) return;
-    const dir = path.dirname(filePath);
-    const ext = path.extname(filePath);
-    const base = path.basename(filePath, ext);
-    const invalidPath = path.join(dir, `${base}.invalid-${Date.now()}${ext || '.bin'}`);
-    fs.renameSync(filePath, invalidPath);
-    console.warn('[UpdateDownload] cached installer moved aside:', reason || 'invalid', invalidPath);
-  } catch (e) {
-    console.warn('[UpdateDownload] failed to move invalid cached installer:', e.message);
-  }
-}
-function reuseVerifiedInstallerJob(opts) {
-  if (!opts || !opts.filePath || !fs.existsSync(opts.filePath)) return null;
-  if (!opts.expectedSize && !opts.sha256 && !opts.sha512) return null;
-  const now = Date.now();
-  const stat = fs.statSync(opts.filePath);
-  const job = {
-    id: 'cached-' + now.toString(36) + '-' + Math.random().toString(36).slice(2, 8),
-    status: 'ready',
-    progress: 100,
-    received: stat.size || 0,
-    total: opts.expectedSize || stat.size || 0,
-    speedBps: 0,
-    etaSeconds: 0,
-    sourceLabel: '本地缓存',
-    attempt: 0,
-    attempts: opts.attempts || 0,
-    mode: 'installer',
-    message: '安装包已下载，可直接打开安装',
-    fileName: opts.fileName || path.basename(opts.filePath),
-    filePath: opts.filePath,
-    version: opts.version || '',
-    downloadUrl: opts.downloadUrl || '',
-    downloadCandidates: opts.downloadCandidates || [],
-    expectedSize: opts.expectedSize || 0,
-    sha256: opts.sha256 || '',
-    sha512: opts.sha512 || '',
-    releaseUrl: opts.releaseUrl || '',
-    failedAttempts: [],
-    cached: true,
-    createdAt: now,
-    updatedAt: now,
-    error: '',
-  };
-  try {
-    verifyUpdateFile(opts.filePath, job);
-    updateDownloadJobs.set(job.id, job);
-    trimUpdateJobs();
-    return job;
-  } catch (err) {
-    moveInvalidUpdateFile(opts.filePath, (err && err.message) || 'cache verification failed');
-    return null;
-  }
-}
-function setUpdateJobError(job, err, fallbackMessage) {
-  const info = classifyUpdateError(err);
-  job.status = 'error';
-  job.error = info.code;
-  job.errorReason = info.reason;
-  job.errorDetail = info.detail;
-  job.message = fallbackMessage || info.reason;
-  job.updatedAt = Date.now();
-}
-function prepareUpdateJobAttempt(job, candidate, index, total) {
-  job.status = 'downloading';
-  job.sourceLabel = candidate.label || '下载线路';
-  job.attempt = index + 1;
-  job.attempts = total;
-  job.received = 0;
-  job.speedBps = 0;
-  job.etaSeconds = 0;
-  job.error = '';
-  job.errorReason = '';
-  job.errorDetail = '';
-  job.updatedAt = Date.now();
-}
-function ensureMirrorCanBeVerified(job, candidate) {
-  if (!candidate || !candidate.mirrored) return;
-  if (job.sha256 || job.sha512) return;
-  throw updateError('MIRROR_HASH_MISSING', 'Mirror download skipped because no digest is available');
-}
-async function downloadUpdateAssetWithMirrors(job) {
-  const tmpPath = job.filePath + '.download';
-  const candidates = Array.isArray(job.downloadCandidates) && job.downloadCandidates.length
-    ? job.downloadCandidates
-    : uniqueDownloadCandidates(job.downloadUrl || '');
-  const failures = [];
-  fs.mkdirSync(UPDATE_DOWNLOAD_DIR, { recursive: true });
-  for (let i = 0; i < candidates.length; i++) {
-    const candidate = candidates[i];
-    try {
-      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) {}
-      ensureMirrorCanBeVerified(job, candidate);
-      prepareUpdateJobAttempt(job, candidate, i, candidates.length);
-      job.message = job.total ? '正在下载完整安装包' : '正在下载完整安装包，等待服务器返回大小';
-
-      const resp = await fetchWithTimeout(candidate.url, {
-        headers: { 'User-Agent': `Mineradio/${APP_VERSION}` },
-      }, 14000);
-      if (!resp.ok) throw updateError('HTTP_' + resp.status, 'HTTP ' + resp.status);
-
-      const totalHeader = parseInt(resp.headers.get('content-length') || '0', 10) || 0;
-      job.total = totalHeader || job.expectedSize || job.total || 0;
-      job.progress = 0;
-      job.updatedAt = Date.now();
-      let speedWindowAt = Date.now();
-      let speedWindowBytes = 0;
-
-      const writer = fs.createWriteStream(tmpPath);
-      const reader = resp.body.getReader();
-      try {
-        while (true) {
-          const chunk = await reader.read();
-          if (chunk.done) break;
-          const buf = Buffer.from(chunk.value);
-          job.received += buf.length;
-          speedWindowBytes += buf.length;
-          const now = Date.now();
-          if (now - speedWindowAt >= 900) {
-            job.speedBps = Math.round(speedWindowBytes / Math.max(0.001, (now - speedWindowAt) / 1000));
-            speedWindowAt = now;
-            speedWindowBytes = 0;
-          }
-          if (job.total > 0) {
-            job.progress = Math.max(1, Math.min(99, Math.round((job.received / job.total) * 100)));
-            job.etaSeconds = job.speedBps > 0 ? Math.max(0, Math.round((job.total - job.received) / job.speedBps)) : 0;
-          } else {
-            const kb = Math.max(1, job.received / 1024);
-            job.progress = Math.max(1, Math.min(88, Math.round(Math.log10(kb + 1) * 24)));
-          }
-          job.message = job.total > 0 ? '正在下载完整安装包' : '正在下载完整安装包，服务器未提供总大小';
-          job.updatedAt = Date.now();
-          if (!writer.write(buf)) await once(writer, 'drain');
-        }
-      } finally {
-        writer.end();
-        await once(writer, 'finish').catch(() => {});
-      }
-
-      verifyUpdateFile(tmpPath, job);
-      if (fs.existsSync(job.filePath)) fs.unlinkSync(job.filePath);
-      fs.renameSync(tmpPath, job.filePath);
-      job.status = 'ready';
-      job.progress = 100;
-      job.etaSeconds = 0;
-      job.message = '安装包已下载';
-      job.updatedAt = Date.now();
-      return;
-    } catch (err) {
-      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) {}
-      const info = classifyUpdateError(err);
-      failures.push({ source: candidate.label || '下载线路', reason: info.reason, detail: info.detail });
-      job.failedAttempts = failures.slice(-6);
-      job.message = i < candidates.length - 1 ? ((candidate.label || '当前线路') + '失败，正在切换线路') : info.reason;
-      job.updatedAt = Date.now();
-      if (i >= candidates.length - 1) setUpdateJobError(job, err, '下载失败：' + info.reason);
-    }
-  }
-}
-function startUpdateDownloadJob(info) {
-  const release = info && info.release ? info.release : {};
-  const asset = release.asset || {};
-  const downloadUrl = release.downloadUrl || asset.downloadUrl || '';
-  if (!info || !info.configured) return { ok: false, error: 'UPDATE_REPOSITORY_NOT_CONFIGURED' };
-  if (!info.updateAvailable) return { ok: false, error: 'NO_UPDATE_AVAILABLE' };
-  if (!/^https?:\/\//i.test(downloadUrl)) return { ok: false, error: 'UPDATE_ASSET_MISSING' };
-
-  const version = info.latestVersion || release.version || '';
-  const existing = activeUpdateJobFor(version);
-  if (existing) return publicUpdateJob(existing);
-
-  const fileName = safeUpdateFileName(asset.name || '', version);
-  const filePath = path.join(UPDATE_DOWNLOAD_DIR, fileName);
-  const downloadCandidates = uniqueDownloadCandidates([downloadUrl].concat(Array.isArray(asset.downloadUrls) ? asset.downloadUrls : []));
-  const expectedSize = asset.size || 0;
-  const sha256 = normalizeDigest(asset.sha256 || '', 'sha256').toLowerCase();
-  const sha512 = normalizeDigest(asset.sha512 || '', 'sha512');
-  const cached = reuseVerifiedInstallerJob({
-    fileName,
-    filePath,
-    version,
-    downloadUrl,
-    downloadCandidates,
-    expectedSize,
-    sha256,
-    sha512,
-    releaseUrl: release.htmlUrl || '',
-    attempts: downloadCandidates.length,
-  });
-  if (cached) return publicUpdateJob(cached);
-
-  const now = Date.now();
-  const job = {
-    id: now.toString(36) + '-' + Math.random().toString(36).slice(2, 8),
-    status: 'queued',
-    progress: 0,
-    received: 0,
-    total: expectedSize,
-    mode: 'installer',
-    fileName,
-    filePath,
-    version,
-    downloadUrl,
-    downloadCandidates,
-    expectedSize,
-    sha256,
-    sha512,
-    releaseUrl: release.htmlUrl || '',
-    sourceLabel: '',
-    attempt: 0,
-    attempts: downloadCandidates.length,
-    failedAttempts: [],
-    createdAt: now,
-    updatedAt: now,
-    error: '',
-  };
-  updateDownloadJobs.set(job.id, job);
-  trimUpdateJobs();
-  downloadUpdateAssetWithMirrors(job);
-  return publicUpdateJob(job);
-}
-function sha256Hex(buffer) {
-  return crypto.createHash('sha256').update(buffer).digest('hex');
-}
-function safePatchRelativePath(value) {
-  const rel = String(value || '').replace(/\\/g, '/').replace(/^\/+/, '').trim();
-  if (!rel || rel.includes('\0')) return '';
-  const parts = rel.split('/').filter(Boolean);
-  if (!parts.length || parts.some(part => part === '..' || part === '.')) return '';
-  const root = parts[0];
-  if (PATCH_ALLOWED_FILES.has(rel)) return rel;
-  if (!PATCH_ALLOWED_ROOTS.has(root)) return '';
-  if (/\.(exe|dll|node|msi|bat|cmd|ps1|pfx|pem|key)$/i.test(rel)) return '';
-  return parts.join('/');
-}
-function patchTargetPath(rel) {
-  const safeRel = safePatchRelativePath(rel);
-  if (!safeRel) return null;
-  const target = path.resolve(__dirname, safeRel);
-  const root = path.resolve(__dirname);
-  if (target !== root && !target.startsWith(root + path.sep)) return null;
-  return target;
-}
-function decodePatchFile(file) {
-  if (!file || typeof file !== 'object') return null;
-  if (typeof file.contentBase64 === 'string') return Buffer.from(file.contentBase64, 'base64');
-  if (typeof file.content === 'string') return Buffer.from(file.content, file.encoding === 'base64' ? 'base64' : 'utf8');
-  return null;
-}
-function backupPatchTarget(job, rel, target) {
-  if (!fs.existsSync(target)) return;
-  const backup = path.join(UPDATE_PATCH_BACKUP_DIR, job.id, rel);
-  fs.mkdirSync(path.dirname(backup), { recursive: true });
-  fs.copyFileSync(target, backup);
-}
-function writePatchFile(job, file) {
-  const rel = safePatchRelativePath(file.path || file.name);
-  const target = rel ? patchTargetPath(rel) : null;
-  const content = decodePatchFile(file);
-  if (!rel || !target || !content) throw new Error('INVALID_PATCH_FILE');
-  if (content.length > PATCH_MAX_BYTES) throw new Error('PATCH_FILE_TOO_LARGE');
-  const expected = String(file.sha256 || '').trim().toLowerCase();
-  const actual = sha256Hex(content);
-  if (expected && expected !== actual) throw new Error('PATCH_HASH_MISMATCH:' + rel);
-  backupPatchTarget(job, rel, target);
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  const tmp = target + '.mineradio-patch';
-  fs.writeFileSync(tmp, content);
-  fs.renameSync(tmp, target);
-  if (expected && sha256Hex(fs.readFileSync(target)) !== expected) throw new Error('PATCH_WRITE_VERIFY_FAILED:' + rel);
-  return rel;
-}
-function normalizePatchPayload(payload) {
-  if (!payload || typeof payload !== 'object') throw new Error('INVALID_PATCH_PAYLOAD');
-  const type = String(payload.type || payload.kind || '');
-  if (type && type !== 'mineradio-resource-patch') throw new Error('UNSUPPORTED_PATCH_TYPE');
-  const from = normalizeVersion(payload.from || payload.baseVersion || '');
-  const to = normalizeVersion(payload.to || payload.version || payload.targetVersion || '');
-  const files = Array.isArray(payload.files) ? payload.files : [];
-  if (!from || compareVersions(from, APP_VERSION) !== 0) throw new Error('PATCH_VERSION_MISMATCH');
-  if (!to || compareVersions(to, APP_VERSION) <= 0) throw new Error('PATCH_TARGET_VERSION_INVALID');
-  if (!files.length) throw new Error('PATCH_EMPTY');
-  if (files.length > 40) throw new Error('PATCH_TOO_MANY_FILES');
-  return { from, to, files, restartRequired: payload.restartRequired !== false };
-}
-async function downloadAndApplyPatch(job) {
-  const chunks = [];
-  try {
-    fs.mkdirSync(UPDATE_DOWNLOAD_DIR, { recursive: true });
-    job.status = 'downloading';
-    job.mode = 'patch';
-    job.message = '正在下载快速补丁';
-    job.updatedAt = Date.now();
-
-    const resp = await fetch(job.downloadUrl, {
-      headers: { 'User-Agent': `Mineradio/${APP_VERSION}` },
-    });
-    if (!resp.ok) throw new Error('Patch download failed ' + resp.status);
-
-    job.total = parseInt(resp.headers.get('content-length') || '0', 10) || job.total || 0;
-    job.received = 0;
-    const reader = resp.body.getReader();
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      const buf = Buffer.from(chunk.value);
-      job.received += buf.length;
-      if (job.received > PATCH_MAX_BYTES) throw new Error('PATCH_TOO_LARGE');
-      chunks.push(buf);
-      job.progress = job.total > 0
-        ? Math.max(1, Math.min(84, Math.round((job.received / job.total) * 84)))
-        : Math.max(1, Math.min(76, Math.round(Math.log10(job.received / 1024 + 1) * 24)));
-      job.updatedAt = Date.now();
-    }
-
-    const raw = Buffer.concat(chunks);
-    const expectedPatchHash = String(job.sha256 || '').trim().toLowerCase();
-    if (expectedPatchHash && sha256Hex(raw) !== expectedPatchHash) throw new Error('PATCH_PACKAGE_HASH_MISMATCH');
-    const patch = normalizePatchPayload(JSON.parse(raw.toString('utf8').replace(/^\uFEFF/, '')));
-    job.version = patch.to;
-    job.message = '正在应用快速补丁';
-    job.progress = 88;
-    job.updatedAt = Date.now();
-    const changed = [];
-    patch.files.forEach(file => changed.push(writePatchFile(job, file)));
-    job.changedFiles = changed;
-    job.status = 'ready';
-    job.progress = 100;
-    job.restartRequired = patch.restartRequired;
-    job.message = patch.restartRequired ? '快速补丁已应用，重启后生效' : '快速补丁已应用';
-    job.updatedAt = Date.now();
-  } catch (e) {
-    job.status = 'error';
-    job.error = e.message || 'PATCH_APPLY_FAILED';
-    job.message = '快速补丁失败，可改用完整安装包';
-    job.updatedAt = Date.now();
-  }
-}
-async function downloadPatchBufferFromCandidate(job, candidate, index, total) {
-  ensureMirrorCanBeVerified(job, candidate);
-  prepareUpdateJobAttempt(job, candidate, index, total);
-  job.mode = 'patch';
-  job.message = '正在下载快速补丁';
-  job.progress = 0;
-  job.updatedAt = Date.now();
-
-  const resp = await fetchWithTimeout(candidate.url, {
-    headers: { 'User-Agent': `Mineradio/${APP_VERSION}` },
-  }, 12000);
-  if (!resp.ok) throw updateError('HTTP_' + resp.status, 'HTTP ' + resp.status);
-
-  job.total = parseInt(resp.headers.get('content-length') || '0', 10) || job.expectedSize || job.total || 0;
-  job.received = 0;
-  const chunks = [];
-  const reader = resp.body.getReader();
-  let speedWindowAt = Date.now();
-  let speedWindowBytes = 0;
-  while (true) {
-    const chunk = await reader.read();
-    if (chunk.done) break;
-    const buf = Buffer.from(chunk.value);
-    job.received += buf.length;
-    speedWindowBytes += buf.length;
-    if (job.received > PATCH_MAX_BYTES) throw updateError('PATCH_TOO_LARGE', 'Patch package is too large');
-    chunks.push(buf);
-    const now = Date.now();
-    if (now - speedWindowAt >= 700) {
-      job.speedBps = Math.round(speedWindowBytes / Math.max(0.001, (now - speedWindowAt) / 1000));
-      speedWindowAt = now;
-      speedWindowBytes = 0;
-    }
-    job.progress = job.total > 0
-      ? Math.max(1, Math.min(84, Math.round((job.received / job.total) * 84)))
-      : Math.max(1, Math.min(76, Math.round(Math.log10(job.received / 1024 + 1) * 24)));
-    job.etaSeconds = job.total > 0 && job.speedBps > 0 ? Math.max(0, Math.round((job.total - job.received) / job.speedBps)) : 0;
-    job.updatedAt = Date.now();
-  }
-  const raw = Buffer.concat(chunks);
-  verifyUpdateBuffer(raw, job);
-  return raw;
-}
-async function downloadAndApplyPatchWithMirrors(job) {
-  const candidates = Array.isArray(job.downloadCandidates) && job.downloadCandidates.length
-    ? job.downloadCandidates
-    : uniqueDownloadCandidates(job.downloadUrl || '');
-  const failures = [];
-  fs.mkdirSync(UPDATE_DOWNLOAD_DIR, { recursive: true });
-  for (let i = 0; i < candidates.length; i++) {
-    const candidate = candidates[i];
-    try {
-      const raw = await downloadPatchBufferFromCandidate(job, candidate, i, candidates.length);
-      const patch = normalizePatchPayload(JSON.parse(raw.toString('utf8').replace(/^\uFEFF/, '')));
-      job.version = patch.to;
-      job.message = '正在应用快速补丁';
-      job.progress = 88;
-      job.etaSeconds = 0;
-      job.updatedAt = Date.now();
-      const changed = [];
-      patch.files.forEach(file => changed.push(writePatchFile(job, file)));
-      job.changedFiles = changed;
-      job.status = 'ready';
-      job.progress = 100;
-      job.restartRequired = patch.restartRequired;
-      job.message = patch.restartRequired ? '快速补丁已应用，重启后生效' : '快速补丁已应用';
-      job.updatedAt = Date.now();
-      return;
-    } catch (err) {
-      const info = classifyUpdateError(err);
-      failures.push({ source: candidate.label || '下载线路', reason: info.reason, detail: info.detail });
-      job.failedAttempts = failures.slice(-6);
-      job.message = i < candidates.length - 1 ? ((candidate.label || '当前线路') + '失败，正在切换线路') : info.reason;
-      job.updatedAt = Date.now();
-      if (i >= candidates.length - 1) setUpdateJobError(job, err, '快速补丁失败：' + info.reason);
-    }
-  }
-}
-function startUpdatePatchJob(info) {
-  const release = info && info.release ? info.release : {};
-  const patch = release.patch || {};
-  const downloadUrl = patch.downloadUrl || '';
-  if (!info || !info.configured) return { ok: false, error: 'UPDATE_REPOSITORY_NOT_CONFIGURED' };
-  if (!info.updateAvailable) return { ok: false, error: 'NO_UPDATE_AVAILABLE' };
-  if (!release.patchAvailable || !/^https?:\/\//i.test(downloadUrl)) return { ok: false, error: 'PATCH_ASSET_MISSING' };
-
-  const version = info.latestVersion || release.version || patch.to || '';
-  const existing = Array.from(updateDownloadJobs.values())
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-    .find(job => job.mode === 'patch' && job.version === version && (job.status === 'queued' || job.status === 'downloading' || job.status === 'ready'));
-  if (existing) return publicUpdateJob(existing);
-
-  const now = Date.now();
-  const downloadCandidates = uniqueDownloadCandidates([downloadUrl].concat(Array.isArray(patch.downloadUrls) ? patch.downloadUrls : []));
-  const job = {
-    id: 'patch-' + now.toString(36) + '-' + Math.random().toString(36).slice(2, 8),
-    status: 'queued',
-    progress: 0,
-    received: 0,
-    total: patch.size || 0,
-    mode: 'patch',
-    fileName: patch.name || safeUpdateFileName('', version).replace(/\.exe$/i, '.patch.json'),
-    filePath: '',
-    version,
-    downloadUrl,
-    downloadCandidates,
-    releaseUrl: release.htmlUrl || '',
-    expectedSize: patch.size || 0,
-    sha256: normalizeDigest(patch.sha256 || '', 'sha256').toLowerCase(),
-    sha512: normalizeDigest(patch.sha512 || '', 'sha512'),
-    restartRequired: true,
-    sourceLabel: '',
-    attempt: 0,
-    attempts: downloadCandidates.length,
-    failedAttempts: [],
-    message: '等待下载快速补丁',
-    createdAt: now,
-    updatedAt: now,
-    error: '',
-  };
-  updateDownloadJobs.set(job.id, job);
-  trimUpdateJobs();
-  downloadAndApplyPatchWithMirrors(job);
-  return publicUpdateJob(job);
 }
 function readRequestBody(req) {
   return new Promise(resolve => {
@@ -1714,7 +1065,8 @@ function normalizeQQUin(raw) {
 }
 function qqCookieUin(obj) {
   obj = obj || qqCookieObject();
-  const raw = Number(obj.login_type) === 2 ? (obj.wxuin || obj.uin || obj.p_uin) : (obj.uin || obj.qqmusic_uin || obj.wxuin || obj.p_uin);
+  const isWechat = !!obj.wxopenid || Number(obj.login_type) === 2;
+  const raw = isWechat ? (obj.wxuin || obj.uin || obj.p_uin) : (obj.uin || obj.qqmusic_uin || obj.wxuin || obj.p_uin);
   return normalizeQQUin(raw);
 }
 function qqCookieMusicKey(obj) {
@@ -1814,7 +1166,7 @@ function qqCookieAvatar(obj, uin) {
 }
 function normalizeQQCookieInput(cookieText) {
   const obj = parseCookieString(cookieText);
-  if (Number(obj.login_type) === 2 && obj.wxuin && !obj.uin) obj.uin = obj.wxuin;
+  if ((obj.wxopenid || Number(obj.login_type) === 2) && obj.wxuin) obj.uin = obj.wxuin;
   if (!obj.uin && (obj.qqmusic_uin || obj.p_uin)) obj.uin = obj.qqmusic_uin || obj.p_uin;
   if (obj.uin) obj.uin = normalizeQQUin(obj.uin);
   return serializeCookieObject(obj);
@@ -3228,18 +2580,24 @@ function withQQVipSyncState(info, probeAvailable) {
   info = info || {};
   const authIncomplete = !!(info.loggedIn && !info.playbackKeyReady);
   const membershipUnknown = !!(info.loggedIn && info.membershipKnown !== true);
+  const stalePositive = !!(info.loggedIn && info.membershipStale && info.isVip);
   const membershipStale = !!(info.loggedIn && (
     authIncomplete
     || membershipUnknown
+    || stalePositive
     || (info.profileUnavailable && !probeAvailable)
   ));
-  return {
+  const normalized = {
     ...info,
     membershipStale,
     authorizationIncomplete: authIncomplete,
     vipSyncState: authIncomplete
       ? 'authorization_incomplete'
-      : (membershipUnknown ? 'unknown' : (probeAvailable ? 'checked' : (membershipStale ? 'stale' : 'profile'))),
+      : (stalePositive ? 'stale_positive' : (membershipUnknown ? 'unknown' : (probeAvailable ? 'checked' : (membershipStale ? 'stale' : 'profile')))),
+  };
+  return {
+    ...normalized,
+    membershipRights: qqVipEntitlementRights(normalized),
   };
 }
 
@@ -3262,9 +2620,9 @@ function mergeQQVipStatus(info, vip, source) {
       vipSource: info.vipSource || 'profile',
     }, false);
   }
-  // A verified positive profile result wins over a stale ordinary response
-  // returned by one of QQ's replicated VIP query endpoints.
-  if (profilePositive && !vip.isVip) {
+  // A profile positive only survives an incomplete/conflicting probe. A
+  // current-account negative quorum is authoritative and must downgrade now.
+  if (profilePositive && !vip.isVip && vip.authoritativeNegative !== true) {
     return withQQVipSyncState({
       ...info,
       membershipKnown: true,
@@ -3291,6 +2649,14 @@ function mergeQQVipStatus(info, vip, source) {
     isSvip: !!vip.isSvip,
     vipLabel: vip.vipLabel || (vip.isVip ? 'VIP' : '无VIP'),
     membershipKnown: true,
+    membershipStale: !!vip.membershipStale,
+    vipEvidenceConflict: !!vip.vipEvidenceConflict,
+    probeDecision: vip.probeDecision || '',
+    authoritativeNegative: vip.authoritativeNegative === true,
+    probeIncomplete: vip.probeIncomplete === true,
+    negativeProbeCount: Math.max(0, Number(vip.negativeProbeCount) || 0),
+    negativeQuorum: Math.max(0, Number(vip.negativeQuorum) || 0),
+    staleUntil: Number(vip.staleUntil) || 0,
     expiresAt: Number(vip.expiresAt) || 0,
     vipCheckedAt: Date.now(),
     vipProbeAvailable: true,
@@ -3302,7 +2668,7 @@ async function fetchQQVipStatus(cookieObj, opts) {
   opts = opts || {};
   cookieObj = cookieObj || qqCookieObject();
   const uin = qqCookieUin(cookieObj);
-  const musicKey = qqCookieMusicKey(cookieObj);
+  const musicKey = qqCookiePlaybackKey(cookieObj);
   if (!uin || !musicKey) return null;
   const cacheKey = qqVipSessionCacheKey(uin, musicKey, cookieObj);
   const cached = cacheKey ? qqVipInfoCache.get(cacheKey) : null;
@@ -3353,6 +2719,11 @@ async function fetchQQVipStatus(cookieObj, opts) {
   const value = await resolveQQVipFromProbes(probes, async probe => {
     return qqMusicRequest(probe.body, { cookie: true, timeoutMs: 4200 });
   });
+  const now = Date.now();
+  const stableValue = preserveQQVipStalePositive(cached, value, { now });
+  if (stableValue && stableValue.membershipStale) {
+    return stableValue;
+  }
   if (value && value.resolved) {
     const ttlMs = qqVipCacheTtlMs(value, {
       positiveTtlMs: QQ_VIP_INFO_CACHE_TTL_MS,
@@ -3360,7 +2731,13 @@ async function fetchQQVipStatus(cookieObj, opts) {
     });
     if (cacheKey && ttlMs > 0) {
       qqVipInfoCache.set(cacheKey, {
-        expiresAt: Date.now() + ttlMs,
+        expiresAt: now + ttlMs,
+        staleUntil: value.isVip
+          ? Math.min(
+            now + ttlMs + 10 * 60 * 1000,
+            Number(value.expiresAt) > 0 ? Number(value.expiresAt) : Number.MAX_SAFE_INTEGER
+          )
+          : 0,
         value,
       });
     }
@@ -4266,8 +3643,8 @@ async function handleQQSongUrl(mid, mediaMid, qualityPreference, playbackHints) 
   const guid = String(10000000 + Math.floor(Math.random() * 90000000));
   const cookieObj = qqCookieObject();
   const uin = qqCookieUin(cookieObj) || '0';
-  const musicKey = qqCookieMusicKey(cookieObj);
   const playbackKey = qqCookiePlaybackKey(cookieObj);
+  const musicKey = playbackKey;
   const fileMediaMid = String(mediaMid || '').trim();
   const requestedQuality = normalizeQualityPreference(qualityPreference);
   const memberTrackHint = qqPlaybackMemberHints(playbackHints);
@@ -5397,45 +4774,18 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (pn === '/api/update/download') {
-    try {
-      const info = await fetchLatestUpdateInfo();
-      const job = startUpdateDownloadJob(info);
-      sendJSON(res, job, job.ok ? 200 : 400);
-    } catch (err) {
-      console.error('[UpdateDownload]', err);
-      sendJSON(res, { ok: false, error: err.message || 'UPDATE_DOWNLOAD_START_FAILED' }, 500);
-    }
-    return;
-  }
-
-  if (pn === '/api/update/download/status') {
-    const id = url.searchParams.get('id') || '';
-    const job = id
-      ? updateDownloadJobs.get(id)
-      : Array.from(updateDownloadJobs.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
-    sendJSON(res, publicUpdateJob(job), job ? 200 : 404);
-    return;
-  }
-
-  if (pn === '/api/update/patch') {
-    try {
-      const info = await fetchLatestUpdateInfo();
-      const job = startUpdatePatchJob(info);
-      sendJSON(res, job, job.ok ? 200 : 400);
-    } catch (err) {
-      console.error('[UpdatePatch]', err);
-      sendJSON(res, { ok: false, error: err.message || 'UPDATE_PATCH_START_FAILED' }, 500);
-    }
-    return;
-  }
-
-  if (pn === '/api/update/patch/status') {
-    const id = url.searchParams.get('id') || '';
-    const job = id
-      ? updateDownloadJobs.get(id)
-      : Array.from(updateDownloadJobs.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).find(item => item.mode === 'patch');
-    sendJSON(res, publicUpdateJob(job), job ? 200 : 404);
+  if (
+    pn === '/api/update/download'
+    || pn === '/api/update/download/status'
+    || pn === '/api/update/patch'
+    || pn === '/api/update/patch/status'
+  ) {
+    sendJSON(res, {
+      ok: false,
+      externalOnly: true,
+      error: 'UPDATE_EXTERNAL_ONLY',
+      message: 'Mineradio 已停用客户端本地下载与快速补丁，请使用外部下载页面。',
+    }, 410);
     return;
   }
 
@@ -5909,6 +5259,95 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pn === '/api/qishui/login/qrcode') {
+    try {
+      const result = await qishuiQrLogin.createQrCode();
+      const data = result && result.data || {};
+      sendJSON(res, {
+        provider: 'qishui',
+        token: String(data.token || ''),
+        qrcode: String(data.qrcode || ''),
+        qrcodeIndexUrl: String(data.qrcode_index_url || ''),
+        expireTime: Number(data.expire_time || 0),
+        message: '请使用抖音 App 扫码并确认登录',
+      });
+    } catch (err) {
+      console.error('[QishuiQRCode]', err);
+      sendJSON(res, {
+        provider: 'qishui',
+        token: '',
+        qrcode: '',
+        error: err && err.code || 'QISHUI_QR_CREATE_FAILED',
+        message: err && err.message || '汽水音乐二维码生成失败',
+      }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/qishui/login/check') {
+    try {
+      const token = String(url.searchParams.get('token') || '').trim();
+      if (!token) {
+        sendJSON(res, {
+          provider: 'qishui',
+          loggedIn: false,
+          status: 'missing_token',
+          error: 'QISHUI_QR_TOKEN_REQUIRED',
+          message: '二维码登录 token 缺失',
+        }, 400);
+        return;
+      }
+      const result = await qishuiQrLogin.checkQrConnect(token);
+      const data = result && result.data || {};
+      const errorCode = Number(data.error_code || 0);
+      const bridgeStatus = qishuiQrLogin.getStatus();
+      if (bridgeStatus.loggedIn) {
+        const cookie = qishuiQrLogin.getCookie();
+        if (!qishuiCookieHasLogin(cookie)) throw new Error('QISHUI_QR_SESSION_COOKIE_MISSING');
+        saveQishuiCookie(cookie);
+        const status = await handleQishuiStatus(qishuiCookie);
+        sendJSON(res, {
+          ...status,
+          provider: 'qishui',
+          ok: true,
+          loggedIn: true,
+          webSession: true,
+          cookieReady: true,
+          status: 'confirmed',
+          errorCode: 0,
+          error_code: 0,
+          message: '登录成功',
+        });
+        return;
+      }
+      let status = String(data.status || '').trim();
+      if (errorCode === 2) status = 'expired';
+      else if (errorCode === 7) status = 'rate_limited';
+      else if (status === '2') status = 'scanned';
+      else if (!status || status === '1') status = 'waiting';
+      sendJSON(res, {
+        provider: 'qishui',
+        loggedIn: false,
+        status,
+        errorCode,
+        error_code: errorCode,
+        retryAfterMs: errorCode === 7 ? 60000 : 0,
+        message: result && result.message || data.description || '',
+      });
+    } catch (err) {
+      console.error('[QishuiLoginCheck]', err);
+      const cancelled = err && err.code === 'QISHUI_MFA_CANCELLED';
+      sendJSON(res, {
+        provider: 'qishui',
+        loggedIn: false,
+        status: cancelled ? 'mfa_cancelled' : 'error',
+        error: err && err.code || 'QISHUI_QR_CHECK_FAILED',
+        message: err && err.message || '汽水音乐登录状态检查失败',
+      }, cancelled ? 409 : 500);
+    }
+    return;
+  }
+
   if (pn === '/api/qishui/status' || pn === '/api/qishui/login/status') {
     try {
       sendJSON(res, await handleQishuiStatus(qishuiCookie));
@@ -5919,45 +5358,9 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (pn === '/api/qishui/login/token') {
-    try {
-      const body = await readRequestBody(req);
-      const token = body.token || body.accessToken || body.access_token || body.data || body.text || '';
-      sendJSON(res, saveQishuiAccessToken(token));
-    } catch (err) {
-      console.error('[QishuiLoginToken]', err);
-      const invalid = err && (err.code === 'INVALID_QISHUI_TOKEN' || err.message === 'INVALID_QISHUI_TOKEN');
-      sendJSON(res, {
-        provider: 'qishui',
-        configured: getQishuiStatus(qishuiCookie).configured,
-        loggedIn: getQishuiStatus(qishuiCookie).loggedIn,
-        error: invalid ? 'INVALID_QISHUI_TOKEN' : err.message,
-        message: invalid ? '汽水 OpenAPI token 无效或太短' : err.message,
-      }, invalid ? 400 : 500);
-    }
-    return;
-  }
-
-  if (pn === '/api/qishui/login/cookie') {
-    try {
-      const body = await readRequestBody(req);
-      const raw = body.cookie || body.data || body.text || '';
-      const normalized = normalizeQishuiCookieInput(raw);
-      if (!qishuiCookieHasLogin(normalized)) {
-        sendJSON(res, { provider: 'qishui', loggedIn: false, error: 'INVALID_QISHUI_COOKIE', message: '汽水 cookie 无效或缺少登录态' }, 400);
-        return;
-      }
-      saveQishuiCookie(normalized);
-      sendJSON(res, { ...await handleQishuiStatus(qishuiCookie), saved: true });
-    } catch (err) {
-      console.error('[QishuiLoginCookie]', err);
-      sendJSON(res, { provider: 'qishui', loggedIn: false, error: err.message }, 500);
-    }
-    return;
-  }
-
   if (pn === '/api/qishui/logout') {
     try {
+      await qishuiQrLogin.clear();
       saveQishuiCookie('');
       sendJSON(res, { ...clearQishuiAccessToken(), webSession: false, cookieReady: false, configured: getQishuiStatus('').configured, loggedIn: getQishuiStatus('').loggedIn });
     } catch (err) {
@@ -6347,8 +5750,17 @@ const server = http.createServer(async (req, res) => {
       const raw = body.cookie || body.data || body.text || '';
       const normalized = normalizeQQCookieInput(raw);
       const obj = parseCookieString(normalized);
-      if (!qqCookieUin(obj) || !qqCookieMusicKey(obj)) {
-        sendJSON(res, { provider: 'qq', loggedIn: false, error: 'INVALID_QQ_COOKIE', message: 'QQ cookie 缺少 uin 或有效登录票据' }, 400);
+      if (!qqCookieUin(obj) || !qqCookiePlaybackKey(obj)) {
+        const hasWebSession = !!(qqCookieUin(obj) && qqCookieMusicKey(obj));
+        sendJSON(res, {
+          provider: 'qq',
+          loggedIn: false,
+          partial: hasWebSession,
+          error: hasWebSession ? 'QQ_PLAYBACK_AUTH_INCOMPLETE' : 'INVALID_QQ_COOKIE',
+          message: hasWebSession
+            ? 'QQ 账号验证已完成，但 QQ 音乐播放授权尚未生成，请重新打开官方登录窗口完成授权'
+            : 'QQ cookie 缺少 uin 或有效 QQ 音乐播放票据',
+        }, 400);
         return;
       }
       saveQQCookie(normalized);

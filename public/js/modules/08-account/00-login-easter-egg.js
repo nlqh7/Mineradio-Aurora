@@ -12,34 +12,9 @@ var loginEasterEggState = {
   cinematicActive: false,
   cinematicReady: false,
   achievementTimer: null,
-  focusRetryTimers: []
+  focusRetryTimers: [],
+  focusRequestId: 0
 };
-
-function loginEasterEggAnswer() {
-  return String.fromCodePoint(19990, 30028, 21644, 24179);
-}
-
-function initializeLoginEasterEggCopy() {
-  var answer = loginEasterEggAnswer();
-  var answerChars = Array.from(answer);
-  var wish = document.getElementById('login-easter-egg-wish-title');
-  if (wish && !wish.textContent) wish.textContent = String.fromCodePoint(25105, 24076, 26395);
-  var phrase = document.getElementById('login-easter-unlock-phrase');
-  if (phrase) {
-    Array.prototype.slice.call(phrase.querySelectorAll('span')).forEach(function (node, index) {
-      if (node && !node.textContent) node.textContent = answerChars[index] || '';
-    });
-  }
-  var cinematic = document.getElementById('login-easter-unlock-cinematic');
-  if (cinematic) cinematic.setAttribute('aria-label', answer + String.fromCodePoint(65292) + '点击继续');
-  var achievement = document.getElementById('login-easter-achievement');
-  var achievementTitle = document.getElementById('login-easter-achievement-title');
-  if (achievementTitle) achievementTitle.textContent = answer + String.fromCodePoint(65281);
-  if (achievement) achievement.setAttribute(
-    'aria-label',
-    '已达成成就' + String.fromCodePoint(65306) + answer + String.fromCodePoint(65281),
-  );
-}
 
 function loginEasterEggEyeMarkup(compact) {
   return '<span class="login-easter-eyes' + (compact ? ' compact' : '') + '" aria-hidden="true">' +
@@ -83,22 +58,27 @@ function setLoginEasterEggMode(locked) {
 }
 
 function bindLoginEasterEggGate() {
-  initializeLoginEasterEggCopy();
   var input = document.getElementById('login-easter-egg-input');
   var shell = input && input.closest ? input.closest('.login-easter-input-shell') : null;
   if (!input || input.__loginEasterEggBound) return;
   input.__loginEasterEggBound = true;
-  input.addEventListener('compositionstart', function () { loginEasterEggState.composing = true; });
+  input.addEventListener('compositionstart', function () {
+    clearLoginEasterEggFocusRetries();
+    loginEasterEggState.composing = true;
+  });
   input.addEventListener('compositionend', function (event) {
     loginEasterEggState.composing = false;
     handleLoginEasterEggInput(event);
   });
   input.addEventListener('beforeinput', function (event) {
+    clearLoginEasterEggFocusRetries();
     if (!loginEasterEggState.prefixLocked || !/^delete/.test(String(event.inputType || ''))) return;
     if ((input.selectionStart || 0) <= 2 && (input.selectionEnd || 0) <= 2) event.preventDefault();
   });
   input.addEventListener('input', handleLoginEasterEggInput);
   input.addEventListener('keydown', function (event) {
+    clearLoginEasterEggFocusRetries();
+    if (event.isComposing || loginEasterEggState.composing || event.keyCode === 229) return;
     if (event.key === 'Enter') {
       event.preventDefault();
       validateLoginEasterEggValue();
@@ -106,7 +86,7 @@ function bindLoginEasterEggGate() {
   });
   if (shell) {
     shell.addEventListener('pointerdown', function () {
-      requestLoginEasterEggKeyboardFocus('wish-pointerdown');
+      clearLoginEasterEggFocusRetries();
       window.requestAnimationFrame(function () { focusLoginEasterEggInput('wish-pointerdown-frame'); });
     });
     shell.addEventListener('click', function () { focusLoginEasterEggInput('wish-click'); });
@@ -129,6 +109,7 @@ async function prepareLoginEasterEggGate() {
   if (!unlocked) {
     restoreLoginEasterEggInputSurface(false);
     window.setTimeout(function () {
+      if (loginEasterEggState.revealed || loginEasterEggState.cinematicActive) return;
       var trigger = document.getElementById('login-easter-eye-trigger');
       if (trigger) trigger.focus({ preventScroll: true });
     }, 220);
@@ -179,16 +160,20 @@ function clearLoginEasterEggFocusRetries() {
   var timers = loginEasterEggState.focusRetryTimers || [];
   timers.forEach(function (timer) { window.clearTimeout(timer); });
   loginEasterEggState.focusRetryTimers = [];
+  loginEasterEggState.focusRequestId = (Number(loginEasterEggState.focusRequestId) || 0) + 1;
 }
 
 function requestLoginEasterEggKeyboardFocus(reason) {
   var api = window.desktopWindow;
-  if (!api || typeof api.requestDesktopKeyboardFocus !== 'function') return false;
+  if (!api || typeof api.requestDesktopKeyboardFocus !== 'function') return Promise.resolve({ ok: true, browserPreview: true });
   try {
-    api.requestDesktopKeyboardFocus('login-easter-egg-' + String(reason || 'input').slice(0, 48));
-    return true;
+    return Promise.resolve(api.requestDesktopKeyboardFocus(
+      'login-easter-egg-' + String(reason || 'input').slice(0, 48)
+    )).catch(function () {
+      return { ok: false, error: 'KEYBOARD_FOCUS_REQUEST_FAILED' };
+    });
   } catch (_) {
-    return false;
+    return Promise.resolve({ ok: false, error: 'KEYBOARD_FOCUS_REQUEST_FAILED' });
   }
 }
 
@@ -225,18 +210,36 @@ function restoreLoginEasterEggInputSurface(clearValue) {
 
 function focusLoginEasterEggInput(reason) {
   var input = restoreLoginEasterEggInputSurface(false);
-  if (!input || !loginEasterEggState.revealed) return;
-  requestLoginEasterEggKeyboardFocus(reason || 'focus');
+  if (!input || !loginEasterEggState.revealed || loginEasterEggState.composing) return;
+  clearLoginEasterEggFocusRetries();
+  if (document.activeElement === input && document.hasFocus()) {
+    return;
+  }
+  if (document.hasFocus()) {
+    input.focus({ preventScroll: true });
+    try {
+      var end = input.value.length;
+      input.setSelectionRange(end, end);
+    } catch (_) { }
+    return;
+  }
+  var requestId = (Number(loginEasterEggState.focusRequestId) || 0) + 1;
+  loginEasterEggState.focusRequestId = requestId;
   function applyInputFocus() {
-    if (!loginEasterEggState.revealed || loginEasterEggState.cinematicActive) return;
+    if (requestId !== loginEasterEggState.focusRequestId ||
+        !loginEasterEggState.revealed ||
+        loginEasterEggState.cinematicActive ||
+        loginEasterEggState.composing) return;
     input.focus({ preventScroll: true });
     try {
       var end = input.value.length;
       input.setSelectionRange(end, end);
     } catch (_) { }
   }
-  applyInputFocus();
-  window.requestAnimationFrame(applyInputFocus);
+  requestLoginEasterEggKeyboardFocus(reason || 'focus').then(function () {
+    applyInputFocus();
+    window.requestAnimationFrame(applyInputFocus);
+  });
 }
 
 function normalizeLoginEasterEggCharacters(value) {
@@ -247,12 +250,11 @@ function loginEasterEggVisibleValue(inputType) {
   var input = document.getElementById('login-easter-egg-input');
   var chars = normalizeLoginEasterEggCharacters(input ? input.value : '');
   if (!loginEasterEggState.prefixLocked) return chars.join('');
-  var prefix = Array.from(loginEasterEggAnswer()).slice(0, 2);
   var suffix;
-  if (chars[0] === prefix[0] && chars[1] === prefix[1]) suffix = chars.slice(2, 4);
+  if (chars[0] === '世' && chars[1] === '界') suffix = chars.slice(2, 4);
   else if (/^delete/.test(String(inputType || '')) && chars.length < 2) suffix = [];
   else suffix = chars.slice(-2);
-  return prefix.join('') + suffix.join('');
+  return '世界' + suffix.join('');
 }
 
 function renderLoginEasterEggCells(value) {
@@ -285,7 +287,7 @@ function setLoginEasterEggStatus(message, mode) {
 function resetLoginEasterEggInputAfterError() {
   var input = document.getElementById('login-easter-egg-input');
   if (!input) return;
-  input.value = loginEasterEggState.prefixLocked ? Array.from(loginEasterEggAnswer()).slice(0, 2).join('') : '';
+  input.value = loginEasterEggState.prefixLocked ? '世界' : '';
   renderLoginEasterEggCells(input.value);
   loginEasterEggState.validating = false;
   focusLoginEasterEggInput();
@@ -296,7 +298,7 @@ async function requestLoginEasterEggUnlock(value) {
   if (api && typeof api.unlockLoginEasterEgg === 'function') {
     return api.unlockLoginEasterEgg(value);
   }
-  var previewPassword = loginEasterEggAnswer();
+  var previewPassword = ['世', '界', '和', '平'].join('');
   if (value !== previewPassword) return { ok: false, unlocked: false, error: 'LOGIN_EASTER_EGG_INVALID' };
   try { localStorage.setItem(LOGIN_EASTER_EGG_BROWSER_PREVIEW_KEY, '1'); } catch (_) { }
   return { ok: true, unlocked: true, browserPreview: true };
@@ -327,6 +329,7 @@ function resetLoginEasterEggUiForReplay() {
   loginEasterEggState.cinematicReady = false;
   loginEasterEggState.achievementTimer = null;
   loginEasterEggState.focusRetryTimers = [];
+  loginEasterEggState.focusRequestId = (Number(loginEasterEggState.focusRequestId) || 0) + 1;
   try { localStorage.removeItem(LOGIN_EASTER_EGG_BROWSER_PREVIEW_KEY); } catch (_) { }
   var active = document.activeElement;
   if (active && typeof active.blur === 'function') {
