@@ -3,6 +3,7 @@ setlocal
 chcp 65001 >nul
 title Start Mineradio
 
+set "ELECTRON_RUN_AS_NODE="
 set "APP_DIR=%~dp0"
 set "ELECTRON_EXE=%APP_DIR%node_modules\electron\dist\electron.exe"
 

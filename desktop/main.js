@@ -80,6 +80,10 @@ let mainWindowVisibilityTimer = null;
 let mainWindowFullscreenVisibilityTimer = null;
 let mainWindowMinimizeRecoveryTimer = null;
 let startupState = { pid: process.pid, startedAt: Date.now(), phase: 'module-loaded', events: [] };
+let mainWindowStateSaveTimer = null;
+let mainWindowPassthroughActive = false;
+let mainWindowPassthroughMouseHot = false;
+let mainWindowPassthroughMousePoller = null;
 const registeredGlobalHotkeys = new Map();
 let fullDesktopEscapeRegistered = false;
 let fullDesktopEscapeExitPending = false;
@@ -129,6 +133,7 @@ const NETEASE_LOGIN_URL = 'https://music.163.com/#/login';
 const QQ_LOGIN_PARTITION = 'persist:mineradio-qqmusic-login';
 const QQ_LOGIN_URL = 'https://y.qq.com/n/ryqq/profile';
 const QQ_LOGIN_FALLBACK_URL = 'https://y.qq.com/';
+const MAIN_WINDOW_STATE_FILE = 'window-state.json';
 const KUGOU_LOGIN_PARTITION = 'persist:mineradio-kugou-login';
 const KUGOU_LOGIN_URL = 'https://www.kugou.com/';
 const KUGOU_LOGIN_WARMUP_URL = 'https://www.kugou.com/newuc/user/uc/type=edit';
@@ -1822,6 +1827,78 @@ function scheduleWindowStateSend(win, delay = 80) {
   }, delay);
 }
 
+function getMainWindowStatePath() {
+  return path.join(app.getPath('userData'), MAIN_WINDOW_STATE_FILE);
+}
+
+function normalizeSavedBounds(bounds) {
+  if (!bounds || typeof bounds !== 'object') return null;
+  const width = Math.round(Number(bounds.width));
+  const height = Math.round(Number(bounds.height));
+  const x = Math.round(Number(bounds.x));
+  const y = Math.round(Number(bounds.y));
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height)) return null;
+  if (width < MIN_WINDOWED_WIDTH || height < MIN_WINDOWED_HEIGHT) return null;
+  return { x, y, width, height };
+}
+
+function rectsOverlap(a, b) {
+  if (!a || !b) return false;
+  const ax = Number(a.x) || 0;
+  const ay = Number(a.y) || 0;
+  const aw = Number(a.width) || 0;
+  const ah = Number(a.height) || 0;
+  const bx = Number(b.x) || 0;
+  const by = Number(b.y) || 0;
+  const bw = Number(b.width) || 0;
+  const bh = Number(b.height) || 0;
+  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+}
+
+function savedBoundsVisible(bounds) {
+  const normalized = normalizeSavedBounds(bounds);
+  if (!normalized) return false;
+  return screen.getAllDisplays().some((display) => rectsOverlap(normalized, display.workArea || display.bounds));
+}
+
+function readMainWindowState() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(getMainWindowStatePath(), 'utf8'));
+    const bounds = normalizeSavedBounds(raw && raw.bounds);
+    if (!bounds || !savedBoundsVisible(bounds)) return null;
+    return { bounds, isMaximized: !!raw.isMaximized };
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeMainWindowState(win) {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized() || win.isFullScreen() || htmlFullscreenActive || windowFullscreenActive) return;
+  try {
+    const isMaximized = win.isMaximized();
+    const bounds = normalizeSavedBounds(isMaximized && typeof win.getNormalBounds === 'function'
+      ? win.getNormalBounds()
+      : win.getBounds());
+    if (!bounds || !savedBoundsVisible(bounds)) return;
+    fs.mkdirSync(app.getPath('userData'), { recursive: true });
+    fs.writeFileSync(getMainWindowStatePath(), JSON.stringify({
+      bounds,
+      isMaximized,
+      savedAt: Date.now(),
+    }, null, 2));
+  } catch (_) {}
+}
+
+function scheduleMainWindowStateSave(win, delay = 360) {
+  if (!win || win.isDestroyed()) return;
+  if (mainWindowStateSaveTimer) clearTimeout(mainWindowStateSaveTimer);
+  mainWindowStateSaveTimer = setTimeout(() => {
+    mainWindowStateSaveTimer = null;
+    writeMainWindowState(win);
+  }, delay);
+}
+
 function rectsOverlapOnY(a, b) {
   if (!a || !b) return false;
   const aTop = Number(a.y) || 0;
@@ -1897,6 +1974,7 @@ function getWindowState(win) {
     isDesktopEmbedded: desktopMode.enabled === true,
     isDesktopInteractive: desktopMode.interactive === true,
     isDesktopIconCoexisting: desktopMode.coexisting === true && desktopMode.iconShapeActive === true,
+    isPassthrough: mainWindowPassthroughActive,
     ...getDisplayState(win),
   };
 }
@@ -2317,6 +2395,78 @@ function bindStartupFailureHandlers() {
 }
 
 bindStartupFailureHandlers();
+
+function sendPassthroughState(win) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    win.webContents.send('desktop-window-passthrough-state', {
+      enabled: mainWindowPassthroughActive,
+    });
+  } catch (_) {}
+}
+
+function updatePassthroughMouseMode() {
+  const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  if (!win || !mainWindowPassthroughActive) return;
+  const bounds = win.getBounds();
+  const point = screen.getCursorScreenPoint();
+  const hotWidth = Math.min(300, Math.max(230, Math.round(bounds.width * 0.22)));
+  const hotHeight = 120;
+  const hot = point.x >= bounds.x + bounds.width - hotWidth
+    && point.x <= bounds.x + bounds.width
+    && point.y >= bounds.y + bounds.height - hotHeight
+    && point.y <= bounds.y + bounds.height;
+  if (hot === mainWindowPassthroughMouseHot) return;
+  mainWindowPassthroughMouseHot = hot;
+  win.setIgnoreMouseEvents(!hot, { forward: true });
+}
+
+function startPassthroughMousePoller() {
+  if (mainWindowPassthroughMousePoller) return;
+  mainWindowPassthroughMousePoller = setInterval(updatePassthroughMouseMode, 32);
+  updatePassthroughMouseMode();
+}
+
+function stopPassthroughMousePoller(win) {
+  if (mainWindowPassthroughMousePoller) {
+    clearInterval(mainWindowPassthroughMousePoller);
+    mainWindowPassthroughMousePoller = null;
+  }
+  mainWindowPassthroughMouseHot = false;
+  if (win && !win.isDestroyed()) win.setIgnoreMouseEvents(false);
+}
+
+function setMainWindowPassthrough(enabled) {
+  const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  if (!win) return { ok: false, enabled: mainWindowPassthroughActive, error: 'NO_MAIN_WINDOW' };
+  const previous = mainWindowPassthroughActive;
+  mainWindowPassthroughActive = !!enabled;
+  try {
+    if (mainWindowPassthroughActive) {
+      mainWindowPassthroughMouseHot = false;
+      win.setIgnoreMouseEvents(true, { forward: true });
+      if (typeof win.setOpacity === 'function') win.setOpacity(1);
+      startPassthroughMousePoller();
+    } else {
+      stopPassthroughMousePoller(win);
+      if (typeof win.setOpacity === 'function') win.setOpacity(1);
+    }
+    if (!mainWindowPassthroughActive) {
+      if (win.isMinimized()) win.restore();
+      if (!win.isVisible()) win.show();
+      win.focus();
+    }
+    sendPassthroughState(win);
+    return { ok: true, enabled: mainWindowPassthroughActive };
+  } catch (e) {
+    mainWindowPassthroughActive = previous;
+    return { ok: false, enabled: previous, error: e.message || 'PASSTHROUGH_FAILED' };
+  }
+}
+
+function toggleMainWindowPassthrough() {
+  return setMainWindowPassthrough(!mainWindowPassthroughActive);
+}
 
 function shouldEnsureDesktopShortcut() {
   if (process.platform !== 'win32') return false;
@@ -3982,6 +4132,14 @@ ipcMain.handle('desktop-window-get-state', (event) => {
   return getWindowState(getSenderWindow(event));
 });
 
+ipcMain.handle('desktop-window-set-passthrough', (_event, enabled) => {
+  return setMainWindowPassthrough(!!enabled);
+});
+
+ipcMain.handle('desktop-window-toggle-passthrough', () => {
+  return toggleMainWindowPassthrough();
+});
+
 ipcMain.on('mineradio-full-desktop-icon-shields', (event, payload = {}) => {
   if (!isTrustedMainWindowIpc(event)) return;
   const rects = payload && payload.enabled === true && payload.interactive === true
@@ -5594,7 +5752,8 @@ async function createWindowOnce() {
     events: [],
   };
 
-  const initialBounds = getWindowedBounds();
+  const savedWindowState = readMainWindowState();
+  const initialBounds = savedWindowState && savedWindowState.bounds ? savedWindowState.bounds : getWindowedBounds();
   const initialMinimum = getAdaptiveWindowMinimumSize(screen.getPrimaryDisplay());
   const win = new BrowserWindow({
     ...initialBounds,
@@ -5648,6 +5807,9 @@ async function createWindowOnce() {
     closeWallpaperWindow('webcontents-destroyed').catch(() => {});
   });
 
+  win.webContents.once('did-finish-load', () => {
+    sendPassthroughState(win);
+  });
   win.webContents.on('did-finish-load', () => {
     showMainWindowSafely(win, 'did-finish-load');
   });
@@ -5696,9 +5858,18 @@ async function createWindowOnce() {
     }
   });
 
-  win.once('ready-to-show', () => showMainWindowSafely(win, 'ready-to-show'));
-  win.on('maximize', () => sendWindowState(win));
-  win.on('unmaximize', () => sendWindowState(win));
+  win.once('ready-to-show', () => {
+    showMainWindowSafely(win, 'ready-to-show');
+    if (savedWindowState && savedWindowState.isMaximized && !win.isFullScreen()) win.maximize();
+  });
+  win.on('maximize', () => {
+    writeMainWindowState(win);
+    sendWindowState(win);
+  });
+  win.on('unmaximize', () => {
+    writeMainWindowState(win);
+    sendWindowState(win);
+  });
   win.on('minimize', () => {
     const minimizeIntent = consumeMainWindowMinimizeIntent(win);
     writeStartupState('window-minimized', {
@@ -5748,14 +5919,17 @@ async function createWindowOnce() {
   win.on('move', () => {
     updateMainWindowMinimumSize(win);
     scheduleWindowStateSend(win);
+    scheduleMainWindowStateSave(win);
     scheduleWallpaperEngineHostBoundsRestart(win, 'move');
   });
   win.on('resize', () => {
     updateMainWindowMinimumSize(win);
     scheduleWindowStateSend(win);
+    scheduleMainWindowStateSave(win);
     scheduleWallpaperEngineHostBoundsRestart(win, 'resize');
   });
   win.on('close', (event) => {
+    writeMainWindowState(win);
     const desktopMode = fullDesktopModeRuntime.getStatus('main-window-close');
     if (desktopMode.enabled === true) {
       event.preventDefault();
@@ -5826,6 +6000,12 @@ async function createWindowOnce() {
     if (appMemoryTrimTimer) {
       clearTimeout(appMemoryTrimTimer);
       appMemoryTrimTimer = null;
+    }
+    mainWindowPassthroughActive = false;
+    stopPassthroughMousePoller(win);
+    if (mainWindowStateSaveTimer) {
+      clearTimeout(mainWindowStateSaveTimer);
+      mainWindowStateSaveTimer = null;
     }
     cancelWallpaperEngineHostBoundsRestart();
     fullDesktopModeHostVisibilityTransitionDepth = 0;
