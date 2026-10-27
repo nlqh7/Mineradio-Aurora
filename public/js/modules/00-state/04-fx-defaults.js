@@ -85,6 +85,7 @@ var fxDefaults = {
   desktopLyricsCinema: false,
   desktopLyricsHighlight: false,
   desktopLyricsFps: 0,
+  desktopPassthroughShowShelf: true,
   wallpaperMode: false,
   wallpaperOpacity: 1,
   wallpaperFps: 60,

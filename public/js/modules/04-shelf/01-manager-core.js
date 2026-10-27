@@ -30,6 +30,7 @@ function makeShelfManager() {
   var openCardIdx = -1;       // 已打开内容框的卡片 (-1 表示无)
   var contentList = null;     // 二级 PSP 滚动列表 manager
   var connectorParticles = null;
+  var passthroughVisible = true; // 透传模式可临时隐藏歌单架
   var playlistPaneCache = { revision: -1, source: null, mine: [], fav: [] };
 
   // 一次性返回完整 items 数组 (不只 5 张, 全部参与 PSP 滚动)
@@ -741,6 +742,13 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
       var asyncCards = mode === 'side' && document.body.classList.contains('splash-active');
       rebuild(asyncCards);
     },
+    setPassthroughVisible: function (visible) {
+      passthroughVisible = visible !== false;
+      if (!passthroughVisible) {
+        if (group) group.visible = false;
+        if (connectorParticles) connectorParticles.visible = false;
+      }
+    },
     getMode: function () { return mode; },
     update: function (dt) {
       if (!group) return;
@@ -769,7 +777,7 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
         : Math.max(0.05, summonVis.closeDuration * 0.65);
       shelfVisibility += (targetVis - shelfVisibility) * durationEaseFactor(visDuration, dt);
       if (shelfVisibility < 0.01 && targetVis === 0) shelfVisibility = 0;
-      group.visible = appRevealed && (mode !== 'side' || shelfVisibility > 0) && (allItems.length > 0 || (contentList && contentList.isOpen()));
+      group.visible = passthroughVisible && appRevealed && (mode !== 'side' || shelfVisibility > 0) && (allItems.length > 0 || (contentList && contentList.isOpen()));
       if (connectorParticles) connectorParticles.visible = group.visible && mode === 'stage';
       if (mode === 'side') {
         var contentOpenForLayer = !!(contentList && contentList.isOpen());

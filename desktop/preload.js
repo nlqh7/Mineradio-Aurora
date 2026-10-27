@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('desktopWindow', {
   toggleFullscreen: () => ipcRenderer.invoke('desktop-window-toggle-fullscreen'),
   exitFullscreenWindowed: () => ipcRenderer.invoke('desktop-window-exit-fullscreen-windowed'),
   getState: () => ipcRenderer.invoke('desktop-window-get-state'),
+  setPassthroughMode: (enabled) => ipcRenderer.invoke('desktop-window-set-passthrough', !!enabled),
+  togglePassthroughMode: () => ipcRenderer.invoke('desktop-window-toggle-passthrough'),
   getGpuDiagnostics: () => ipcRenderer.invoke('mineradio-get-gpu-diagnostics'),
   getMemorySnapshot: () => ipcRenderer.invoke('mineradio-memory-get-snapshot'),
   configureMemoryReduct: (payload) => ipcRenderer.invoke('mineradio-memory-configure-auto', payload || {}),
@@ -137,6 +139,12 @@ contextBridge.exposeInMainWorld('desktopWindow', {
     const listener = (_event, payload) => callback(payload || {});
     ipcRenderer.on('mineradio-wallpaper-runtime-state', listener);
     return () => ipcRenderer.removeListener('mineradio-wallpaper-runtime-state', listener);
+  },
+  onPassthroughModeState: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload || {});
+    ipcRenderer.on('desktop-window-passthrough-state', listener);
+    return () => ipcRenderer.removeListener('desktop-window-passthrough-state', listener);
   },
   onStateChange: (callback) => {
     const listener = (_event, state) => callback(state);

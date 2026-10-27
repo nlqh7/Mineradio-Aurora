@@ -1454,8 +1454,60 @@ setInterval(function () {
 var desktopFullscreenActive = false;
 var documentFullscreenActive = false;
 var desktopWindowState = {};
+var desktopPassthroughActive = false;
 var desktopWindowMinimizeTimer = 0;
 var desktopWindowRestoreTimer = 0;
+
+function refreshDesktopPassthroughToggle() {
+  var el = document.getElementById('t-desktopPassthrough');
+  if (el) el.classList.toggle('on', !!desktopPassthroughActive);
+  var shelfBtn = document.getElementById('desktop-passthrough-shelf-btn');
+  if (shelfBtn) {
+    var on = !fx || fx.desktopPassthroughShowShelf !== false;
+    shelfBtn.classList.toggle('on', on);
+    shelfBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    shelfBtn.textContent = on ? '歌单架: 开' : '歌单架: 关';
+  }
+}
+
+function syncDesktopPassthroughSceneState() {
+  if (typeof shelfManager === 'undefined' || !shelfManager || !shelfManager.setPassthroughVisible) return;
+  var showShelf = !desktopPassthroughActive || !fx || fx.desktopPassthroughShowShelf !== false;
+  shelfManager.setPassthroughVisible(showShelf);
+}
+
+function toggleDesktopPassthroughShelf() {
+  fx.desktopPassthroughShowShelf = fx.desktopPassthroughShowShelf === false;
+  saveLyricLayout({ user: true, reason: 'desktopPassthroughShowShelf' });
+  syncDesktopPassthroughSceneState();
+  refreshDesktopPassthroughToggle();
+  showToast(fx.desktopPassthroughShowShelf !== false ? '透传模式会显示歌单架' : '透传模式会隐藏歌单架');
+}
+
+function setDesktopPassthroughMode(enabled, silent) {
+  var api = window.desktopWindow;
+  if (!api || !api.isDesktop || typeof api.setPassthroughMode !== 'function') {
+    if (!silent) showToast('桌面透传仅桌面版可用');
+    return;
+  }
+  api.setPassthroughMode(!!enabled).then(function (res) {
+    if (!res || !res.ok) {
+      if (!silent) showToast('透传模式切换失败');
+      return;
+    }
+    desktopPassthroughActive = !!res.enabled;
+    document.body.classList.toggle('desktop-passthrough-mode', desktopPassthroughActive);
+    syncDesktopPassthroughSceneState();
+    refreshDesktopPassthroughToggle();
+    if (!silent) showToast(desktopPassthroughActive ? '透传模式已开启，右下角可退出' : '透传模式已关闭');
+  }).catch(function () {
+    if (!silent) showToast('透传模式切换失败');
+  });
+}
+
+function toggleDesktopPassthroughMode() {
+  setDesktopPassthroughMode(!desktopPassthroughActive, false);
+}
 
 function desktopWindowReducedMotion() {
   return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -1546,6 +1598,12 @@ function toggleFullscreen() {
     desktopWindowState = Object.assign(desktopWindowState, state || {});
     var isHidden = !!desktopWindowState.isMinimized || desktopWindowState.isVisible === false;
     if (wasHidden && !isHidden) animateDesktopWindowRestore();
+    if (Object.prototype.hasOwnProperty.call(desktopWindowState, 'isPassthrough')) {
+      desktopPassthroughActive = !!desktopWindowState.isPassthrough;
+      document.body.classList.toggle('desktop-passthrough-mode', desktopPassthroughActive);
+      syncDesktopPassthroughSceneState();
+      refreshDesktopPassthroughToggle();
+    }
     var isMaximized = !!desktopWindowState.isMaximized;
     var isFullScreen = !!desktopWindowState.isFullScreen || !!desktopWindowState.isNativeFullScreen || !!desktopWindowState.isHtmlFullScreen || !!desktopWindowState.isWindowFullScreen || !!document.fullscreenElement;
     var wasFullScreen = desktopFullscreenActive;
@@ -1612,6 +1670,16 @@ function toggleFullscreen() {
       updateFxInputs();
       saveLyricLayout({ user: true, reason: 'desktopLyrics' });
       showToast(enabled ? '桌面歌词已开启' : '桌面歌词已关闭');
+    });
+  }
+  if (typeof api.onPassthroughModeState === 'function') {
+    api.onPassthroughModeState(function (payload) {
+      var wasActive = desktopPassthroughActive;
+      desktopPassthroughActive = !!(payload && payload.enabled);
+      document.body.classList.toggle('desktop-passthrough-mode', desktopPassthroughActive);
+      syncDesktopPassthroughSceneState();
+      refreshDesktopPassthroughToggle();
+      if (wasActive && !desktopPassthroughActive) showToast('透传模式已关闭');
     });
   }
 

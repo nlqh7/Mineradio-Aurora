@@ -804,6 +804,8 @@
               title="桌面歌词绑定鼓点电影震动，基础漂浮始终保留"><span>桌面歌词电影震动</span><span class="dot"></span></div>
             <div class="fx-toggle" id="t-desktopLyricsHighlight" onclick="toggleFx('desktopLyricsHighlight')"
               title="桌面歌词按播放进度高亮"><span>桌面歌词高亮跟随</span><span class="dot"></span></div>
+            <div class="fx-toggle" id="t-desktopPassthrough" onclick="toggleDesktopPassthroughMode()"
+              title="背景透明，桌面可见且可操作；右下角可退出或开关歌单架"><span>透传模式</span><span class="dot"></span></div>
             <div class="fx-toggle" id="t-wallpaperMode" onclick="toggleFx('wallpaperMode')"
               title="把当前完整 Mineradio 放到 Windows 桌面；右上控制器可显示、隐藏桌面图标，Esc 退出">
               <span>完整桌面模式<em class="fx-dev-badge">试验</em></span><span class="dot"></span></div>
@@ -1924,6 +1926,12 @@
         <span class="desktop-mode-switch-track" aria-hidden="true"><span></span></span>
       </button>
     </div>
+  </div>
+
+  <div id="desktop-passthrough-panel">
+    <button class="desktop-passthrough-btn exit" type="button" onclick="setDesktopPassthroughMode(false, false)">退出透传</button>
+    <button class="desktop-passthrough-btn" id="desktop-passthrough-shelf-btn" type="button"
+      onclick="toggleDesktopPassthroughShelf()" aria-pressed="true">歌单架: 开</button>
   </div>
 
   <script src="js/index-loader.js"></script>
