@@ -338,15 +338,30 @@ function cancelWallpaperEngineVideoRetry() {
   wallpaperEngineVideoRetryTimer = 0;
 }
 
-// Chromium 偶发问题：窗口最小化/恢复后 <video> 媒体管线正常（playing、readyState 4），
-// 但合成层停止向窗口呈现新帧，肉眼看到纯黑。强制重建合成层可立即恢复。
-function forceWallpaperEngineVideoLayerRebuild(video) {
-  if (!video || !video.style) return;
+// Chromium 偶发问题：窗口隐藏/恢复（或启动时页面尚不可见就开播）后，<video> 媒体管线
+// 看似正常（playing、readyState 4、requestVideoFrameCallback 正常触发），但画面纯黑。
+// 此时在同一个元素上 display 切换甚至重新请求播放都无效，只有换成新的 <video> 节点
+// 才能重新上屏。这里整体替换元素并返回新节点，调用方需用返回值继续操作。
+function recreateWallpaperEngineVideoElement(video) {
+  video = video || document.getElementById('wallpaper-engine-video');
+  if (!video || !video.parentNode) return video;
   try {
-    video.style.display = 'none';
-    void video.offsetHeight;
-    video.style.display = '';
-  } catch (e) { }
+    var clone = video.cloneNode(false);
+    clone.removeAttribute('src');
+    video.parentNode.replaceChild(clone, video);
+    return clone;
+  } catch (e) {
+    return video;
+  }
+}
+
+var wallpaperEngineVideoLastRecoverAt = 0;
+function recoverWallpaperEngineVideoPlayback(item) {
+  wallpaperEngineVideoLastRecoverAt = Date.now();
+  // 先换掉可能被 Chromium 卡死的 <video> 节点，再走完整加载流程（它会重新
+  // getElementById 拿到新节点，并设置 src/poster/事件后 load()）
+  recreateWallpaperEngineVideoElement();
+  applyWallpaperEngineBackground(item, true);
 }
 
 // 自愈看门狗：壁纸视频在本应可见时停播/无数据（如系统挂起恢复、GPU 驱动重置后
@@ -363,8 +378,10 @@ function startWallpaperEngineVideoWatchdog() {
     var video = document.getElementById('wallpaper-engine-video');
     if (!video) return;
     if (video.paused || video.readyState < 2 || (video.error && video.error.code)) {
+      // 恢复后 4K 视频重新加载需要数秒，宽限期内不再重复重建，否则永远加载不完
+      if (Date.now() - wallpaperEngineVideoLastRecoverAt < 15000) return;
       var item = wallpaperEngineProjectById(wallpaperEngineSelection.id);
-      if (item) requestWallpaperEngineVideoPlayback(video, item, 'media', wallpaperEngineLayerToken, false, 0);
+      if (item) recoverWallpaperEngineVideoPlayback(item);
     }
   }, 4000);
 }
@@ -2406,9 +2423,7 @@ function bindWallpaperEngineLibraryEvents() {
           cancelWallpaperEngineVideoRetry();
           try { video.pause(); } catch (e) { }
         } else if (document.body.classList.contains('wallpaper-engine-active')) {
-          var token = wallpaperEngineLayerToken;
-          forceWallpaperEngineVideoLayerRebuild(video);
-          requestWallpaperEngineVideoPlayback(video, item, 'media', token, false, 0);
+          recoverWallpaperEngineVideoPlayback(item);
         }
         return;
       }
