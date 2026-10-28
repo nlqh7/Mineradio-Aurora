@@ -338,6 +338,37 @@ function cancelWallpaperEngineVideoRetry() {
   wallpaperEngineVideoRetryTimer = 0;
 }
 
+// Chromium 偶发问题：窗口最小化/恢复后 <video> 媒体管线正常（playing、readyState 4），
+// 但合成层停止向窗口呈现新帧，肉眼看到纯黑。强制重建合成层可立即恢复。
+function forceWallpaperEngineVideoLayerRebuild(video) {
+  if (!video || !video.style) return;
+  try {
+    video.style.display = 'none';
+    void video.offsetHeight;
+    video.style.display = '';
+  } catch (e) { }
+}
+
+// 自愈看门狗：壁纸视频在本应可见时停播/无数据（如系统挂起恢复、GPU 驱动重置后
+// 没有任何事件触发恢复路径），自动走官方播放通道拉起。
+var wallpaperEngineVideoWatchdogTimer = 0;
+function startWallpaperEngineVideoWatchdog() {
+  if (wallpaperEngineVideoWatchdogTimer) return;
+  wallpaperEngineVideoWatchdogTimer = setInterval(function () {
+    if (!wallpaperEngineSelection || !wallpaperEngineSelection.active
+      || wallpaperEngineSelection.kind !== 'media'
+      || wallpaperEngineSelection.mediaType !== 'video') return;
+    if (document.hidden || !document.body.classList.contains('wallpaper-engine-active')) return;
+    if (document.body.classList.contains('desktop-passthrough-mode')) return;
+    var video = document.getElementById('wallpaper-engine-video');
+    if (!video) return;
+    if (video.paused || video.readyState < 2 || (video.error && video.error.code)) {
+      var item = wallpaperEngineProjectById(wallpaperEngineSelection.id);
+      if (item) requestWallpaperEngineVideoPlayback(video, item, 'media', wallpaperEngineLayerToken, false, 0);
+    }
+  }, 4000);
+}
+
 function cancelWallpaperEngineFirstFrameWait() {
   var wait = wallpaperEngineFirstFrameWait;
   wallpaperEngineFirstFrameWait = null;
@@ -2289,6 +2320,7 @@ function restoreHiddenWallpaperEngineItems() {
 }
 
 function bindWallpaperEngineLibraryEvents() {
+  startWallpaperEngineVideoWatchdog();
   var desktopApi = wallpaperEngineDesktopApi();
   if (!wallpaperEngineHostBoundsUnsubscribe && desktopApi && typeof desktopApi.onWallpaperEngineHostBoundsChanged === 'function') {
     wallpaperEngineHostBoundsUnsubscribe = desktopApi.onWallpaperEngineHostBoundsChanged(function (payload) {
@@ -2375,6 +2407,7 @@ function bindWallpaperEngineLibraryEvents() {
           try { video.pause(); } catch (e) { }
         } else if (document.body.classList.contains('wallpaper-engine-active')) {
           var token = wallpaperEngineLayerToken;
+          forceWallpaperEngineVideoLayerRebuild(video);
           requestWallpaperEngineVideoPlayback(video, item, 'media', token, false, 0);
         }
         return;
