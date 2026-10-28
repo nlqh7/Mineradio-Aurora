@@ -118,6 +118,10 @@ function executeHotkeyAction(actionKey, source) {
     }).catch(function () { });
   }
   if (actionKey === 'toggleDesktopLyrics') return toggleFx('desktopLyrics');
+  if (actionKey === 'togglePassthrough') {
+    if (typeof toggleDesktopPassthroughMode === 'function') return toggleDesktopPassthroughMode();
+    return undefined;
+  }
 }
 function desktopInteractionHotkeyHint() {
   var binding = hotkeySettings && hotkeySettings.global && hotkeySettings.global.toggleDesktopInteraction;
