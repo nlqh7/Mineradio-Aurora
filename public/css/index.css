@@ -676,7 +676,9 @@ body.desktop-shell #desktop-titlebar::after {
 }
 
 body.desktop-passthrough-mode #custom-bg,
-body.desktop-passthrough-mode #album-bg {
+body.desktop-passthrough-mode #album-bg,
+body.desktop-passthrough-mode #album-bg-next,
+body.desktop-passthrough-mode #wallpaper-engine-layer {
   opacity: 0 !important;
   visibility: hidden !important
 }

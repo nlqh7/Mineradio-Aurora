@@ -1471,9 +1471,35 @@ function refreshDesktopPassthroughToggle() {
 }
 
 function syncDesktopPassthroughSceneState() {
-  if (typeof shelfManager === 'undefined' || !shelfManager || !shelfManager.setPassthroughVisible) return;
-  var showShelf = !desktopPassthroughActive || !fx || fx.desktopPassthroughShowShelf !== false;
-  shelfManager.setPassthroughVisible(showShelf);
+  if (typeof shelfManager !== 'undefined' && shelfManager && shelfManager.setPassthroughVisible) {
+    var showShelf = !desktopPassthroughActive || !fx || fx.desktopPassthroughShowShelf !== false;
+    shelfManager.setPassthroughVisible(showShelf);
+  }
+  // 透传时壁纸/背景视频不可见，暂停解码省资源；退出时走官方播放恢复通道。
+  var weVideo = document.getElementById('wallpaper-engine-video');
+  if (weVideo && document.body.classList.contains('wallpaper-engine-active')) {
+    if (desktopPassthroughActive) {
+      try { weVideo.pause(); } catch (_) { }
+    } else if (weVideo.paused
+      && typeof wallpaperEngineSelection !== 'undefined' && wallpaperEngineSelection
+      && wallpaperEngineSelection.active && wallpaperEngineSelection.mediaType === 'video'
+      && typeof wallpaperEngineProjectById === 'function'
+      && typeof requestWallpaperEngineVideoPlayback === 'function') {
+      var weItem = wallpaperEngineProjectById(wallpaperEngineSelection.id);
+      if (weItem) {
+        requestWallpaperEngineVideoPlayback(weVideo, weItem, 'media',
+          typeof wallpaperEngineLayerToken !== 'undefined' ? wallpaperEngineLayerToken : 0, false, 0);
+      }
+    }
+  }
+  var bgVideo = document.getElementById('custom-bg-video');
+  if (bgVideo) {
+    if (desktopPassthroughActive) {
+      try { bgVideo.pause(); } catch (_) { }
+    } else if (bgVideo.paused && bgVideo.src) {
+      try { var p = bgVideo.play(); if (p && p.catch) p.catch(function () { }); } catch (_) { }
+    }
+  }
 }
 
 function toggleDesktopPassthroughShelf() {
